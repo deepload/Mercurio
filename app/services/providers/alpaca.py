@@ -551,7 +551,7 @@ class AlpacaProvider(MarketDataProvider):
             start = end - timedelta(minutes=30)  # Look back 30 minutes to ensure we get data
             end_str = end.strftime("%Y-%m-%dT%H:%M:%SZ")
             start_str = start.strftime("%Y-%m-%dT%H:%M:%SZ")
-            
+            #Mytest
             # Try direct API call to v1beta3 bars endpoint first
             urls_to_try = [
                 # Primary endpoint - v1beta3/crypto/us/bars
