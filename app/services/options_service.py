@@ -421,6 +421,298 @@ class OptionsService:
             "time_to_expiry": 24     # Days until expiration
         }
     
+    async def get_options_chain(self, symbol: str) -> List[Any]:
+        """
+        Get options chain for a given symbol.
+        This is an adapter method that calls get_available_options and transforms the result
+        to the format expected by ButterflySpreadStrategy and other strategies.
+        
+        For crypto assets, this generates synthetic options chains since Alpaca does not
+        currently support options trading for cryptocurrencies.
+        
+        Args:
+            symbol: The underlying asset symbol (e.g., 'AAPL' or 'BTC/USD')
+            
+        Returns:
+            List of OptionContract objects
+        """
+        from app.core.models.option import OptionContract, OptionType
+        import math
+        import random
+        
+        try:
+            # Check if this is a crypto symbol
+            is_crypto = '/' in symbol
+            
+            # For crypto assets, always use synthetic options
+            if is_crypto:
+                logger.info(f"Generating synthetic options chain for crypto asset: {symbol}")
+                return await self._create_synthetic_options_chain(symbol)
+            
+            # For stocks and other assets, try to get real options data first
+            options_data = await self.get_available_options(symbol)
+            option_contracts = []
+            
+            # If we got actual options data, convert it
+            if options_data and isinstance(options_data, list) and len(options_data) > 0:
+                logger.info(f"Using real options data for {symbol} ({len(options_data)} contracts)")
+                for opt in options_data:
+                    contract = OptionContract(
+                        symbol=opt.get('symbol'),
+                        underlying_symbol=symbol,
+                        strike=float(opt.get('strike_price', 0)),
+                        expiration=opt.get('expiration_date'),
+                        option_type=OptionType.CALL if opt.get('type') == 'call' else OptionType.PUT,
+                        bid=float(opt.get('bid', 0)),
+                        ask=float(opt.get('ask', 0)),
+                        last_price=float(opt.get('last', 0)),
+                        volume=int(opt.get('volume', 0)),
+                        open_interest=int(opt.get('open_interest', 0)),
+                        implied_volatility=float(opt.get('implied_volatility', 0)),
+                        delta=float(opt.get('delta', 0)),
+                        gamma=float(opt.get('gamma', 0)),
+                        theta=float(opt.get('theta', 0)),
+                        vega=float(opt.get('vega', 0))
+                    )
+                    # Add the underlying price if available
+                    if 'underlying_price' in opt:
+                        contract.underlying_price = float(opt.get('underlying_price'))
+                    
+                    option_contracts.append(contract)
+                
+                return option_contracts
+            else:
+                # Fallback to synthetic options for non-crypto assets too
+                logger.warning(f"No options data available for {symbol}, creating synthetic options chain")
+                return await self._create_synthetic_options_chain(symbol)
+            
+        except Exception as e:
+            logger.error(f"Error fetching options chain for {symbol}: {str(e)}")
+            return []
+    
+    async def _create_synthetic_options_chain(self, symbol: str) -> List[Any]:
+        """
+        Create a synthetic options chain for an asset, particularly useful for crypto
+        assets that don't have real options available on Alpaca.
+        
+        Args:
+            symbol: The underlying asset symbol
+            
+        Returns:
+            List of synthetic OptionContract objects
+        """
+        from app.core.models.option import OptionContract, OptionType
+        import math
+        import random
+        from datetime import datetime, timedelta
+        
+        option_contracts = []
+        
+        try:
+            # Get the actual current price of the asset from market data service
+            current_price = None
+            
+            if hasattr(self, 'market_data') and self.market_data is not None:
+                try:
+                    latest_price_data = await self.market_data.get_latest_price(symbol)
+                    if latest_price_data and isinstance(latest_price_data, dict) and 'close' in latest_price_data:
+                        current_price = float(latest_price_data['close'])
+                    else:
+                        # Try to get historical data and use the last close price
+                        end_date = datetime.now()
+                        start_date = end_date - timedelta(days=7)  # Look back a week
+                        hist_data = await self.market_data.get_historical_data(symbol, start_date, end_date, timeframe="1d")
+                        if hist_data is not None and not hist_data.empty:
+                            # Get the latest close price from the DataFrame
+                            current_price = float(hist_data['close'].iloc[-1])
+                except Exception as e:
+                    logger.warning(f"Error getting price for {symbol} from market data service: {str(e)}")
+            
+            # If we couldn't get a real price, use a reasonable default based on the asset
+            if not current_price:
+                logger.warning(f"Using fallback price for {symbol}")
+                # Extract base symbol for crypto (e.g., 'BTC' from 'BTC/USD')
+                base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+                
+                # Fallback prices for common cryptocurrencies
+                crypto_prices = {
+                    'BTC': 35000.0,
+                    'ETH': 2250.0,
+                    'SOL': 125.0,
+                    'DOGE': 0.115,
+                    'XRP': 0.55,
+                    'AVAX': 30.50,
+                    'SHIB': 0.00002,
+                    'PEPE': 0.0000089,
+                    'ADA': 0.45,
+                    'DOT': 7.50,
+                    'MATIC': 0.75,
+                    'LTC': 85.0,
+                    'UNI': 6.25,
+                    'GRT': 0.18,
+                    'CRV': 0.60,
+                    'AAVE': 95.0,
+                    'MKR': 1450.0,
+                    'SUSHI': 1.25,
+                    'BAT': 0.25,
+                    'XTZ': 0.85,
+                    'YFI': 9500.0,
+                    'TRUMP': 5.25,
+                }
+                current_price = crypto_prices.get(base_symbol, 100.0)
+            
+            logger.info(f"Using current price of {current_price} for {symbol} options chain")
+            
+            # Generate multiple expiration dates (weekly, monthly, quarterly)
+            today = datetime.now()
+            expiry_dates = [
+                # Weekly options (next 4 Fridays)
+                (today + timedelta(days=(4 - today.weekday()) % 7 + 7 * 0)).strftime("%Y-%m-%d"),
+                (today + timedelta(days=(4 - today.weekday()) % 7 + 7 * 1)).strftime("%Y-%m-%d"),
+                (today + timedelta(days=(4 - today.weekday()) % 7 + 7 * 2)).strftime("%Y-%m-%d"),
+                (today + timedelta(days=(4 - today.weekday()) % 7 + 7 * 3)).strftime("%Y-%m-%d"),
+                
+                # Monthly options (end of months)
+                (today.replace(day=28) + timedelta(days=4)).strftime("%Y-%m-%d"),
+                (today.replace(day=28) + timedelta(days=35)).strftime("%Y-%m-%d"),
+                (today.replace(day=28) + timedelta(days=65)).strftime("%Y-%m-%d"),
+                
+                # Quarterly options
+                (today + timedelta(days=90)).strftime("%Y-%m-%d"),
+                (today + timedelta(days=180)).strftime("%Y-%m-%d")
+            ]
+            
+            # Remove duplicates
+            expiry_dates = list(set(expiry_dates))
+            logger.info(f"Generated {len(expiry_dates)} expiration dates for {symbol}")
+            
+            # Extract base symbol for volatility lookup
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+            
+            # Different assets have different volatility profiles
+            base_volatility = {
+                'BTC': 0.65,  # Bitcoin - relatively less volatile among cryptos
+                'ETH': 0.75,  # Ethereum
+                'SOL': 0.95,  # Solana - higher volatility
+                'DOGE': 1.2,  # Dogecoin - meme coin, very volatile
+                'XRP': 0.85,  # Ripple
+                'AVAX': 0.90,  # Avalanche
+                'SHIB': 1.5,   # Shiba Inu - very high volatility
+                'PEPE': 1.8,   # Pepe - extreme volatility
+            }.get(base_symbol, 0.85)  # Default volatility for unknown assets
+            
+            # Create appropriate strike prices based on the asset's price
+            price_magnitude = max(0, math.floor(math.log10(max(current_price, 0.001))))
+            
+            # For very low-priced assets (like SHIB), use finer granularity
+            if current_price < 0.01:
+                strike_pct_steps = [0.7, 0.8, 0.9, 0.95, 0.975, 0.99, 0.995, 1.0, 1.005, 1.01, 1.025, 1.05, 1.1, 1.2, 1.3]
+            elif current_price < 1.0:
+                strike_pct_steps = [0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 1.0, 1.01, 1.02, 1.05, 1.1, 1.2, 1.3]
+            else:  # For higher priced assets
+                strike_pct_steps = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.975, 1.0, 1.025, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3]
+            
+            # Create strikes based on percentages of current price
+            strikes = [round(current_price * pct, max(0, 8 - price_magnitude)) for pct in strike_pct_steps]
+            
+            # Generate synthetic option contracts for each expiration date and strike
+            for expiry_date in expiry_dates:
+                # Calculate time to expiration in years for option pricing
+                expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d")
+                days_to_expiry = (expiry_dt - today).days
+                t = max(0.01, days_to_expiry / 365.0)  # Time in years, minimum 0.01 to avoid division by zero
+                
+                # Time-based volatility adjustments (further dates have higher volatility)
+                if days_to_expiry <= 7:
+                    iv_time_factor = 0.85  # Lower IV for very short-term options
+                elif days_to_expiry <= 30:
+                    iv_time_factor = 1.0   # Standard IV for normal expiries
+                elif days_to_expiry <= 90:
+                    iv_time_factor = 1.15  # Higher IV for longer-term options
+                else:
+                    iv_time_factor = 1.25  # Much higher IV for LEAPS-like options
+                
+                for strike in strikes:
+                    # Calculate moneyness (how far in/out of the money)
+                    moneyness = strike / current_price
+                    
+                    # Apply volatility smile - OTM options have higher implied volatility
+                    iv_smile_adjustment = 1.0 + 0.2 * (abs(math.log(moneyness)))**1.5
+                    
+                    # Calculate final implied volatility
+                    iv = base_volatility * iv_time_factor * iv_smile_adjustment
+                    
+                    # Set reasonable bounds for IV
+                    iv = min(max(iv, 0.1), 2.5)
+                    
+                    # Calculate call option delta (approximate)
+                    d1 = (math.log(current_price / strike) + (0.03 + 0.5 * iv * iv) * t) / (iv * math.sqrt(t))
+                    call_delta = min(max(0.01, 0.5 + 0.5 * d1), 0.99)
+                    put_delta = call_delta - 1.0  # Put-call parity for delta
+                    
+                    # Calculate option pricing (simplified Black-Scholes)
+                    atm_factor = math.exp(-0.5 * (d1**2)) / (2.5066 * math.sqrt(t))
+                    call_theta = -current_price * iv * atm_factor / (2 * math.sqrt(t)) * 365  # Annualized
+                    
+                    # Calculate approximate prices
+                    call_theoretical = current_price * call_delta
+                    put_theoretical = call_theoretical - current_price + strike
+                    
+                    # Apply bid-ask spread
+                    call_bid = max(0.01, call_theoretical * 0.95)
+                    call_ask = call_theoretical * 1.05
+                    put_bid = max(0.01, put_theoretical * 0.95)
+                    put_ask = put_theoretical * 1.05
+                    
+                    # Create call option
+                    call = OptionContract(
+                        symbol=f"{symbol.replace('/', '')}_{expiry_date}_C_{strike}",
+                        underlying_symbol=symbol,
+                        strike=strike,
+                        expiration=expiry_date,
+                        option_type=OptionType.CALL,
+                        bid=call_bid,
+                        ask=call_ask,
+                        last_price=(call_bid + call_ask) / 2,
+                        volume=random.randint(50, 500),
+                        open_interest=random.randint(100, 1000),
+                        implied_volatility=iv,
+                        delta=call_delta,
+                        gamma=0.05 * (1 - abs(2 * call_delta - 1)),  # Gamma peaks at ATM
+                        theta=call_theta,  # Theta (time decay)
+                        vega=current_price * math.sqrt(t) * atm_factor,  # Vega (volatility sensitivity)
+                        underlying_price=current_price
+                    )
+                    option_contracts.append(call)
+                    
+                    # Create put option
+                    put = OptionContract(
+                        symbol=f"{symbol.replace('/', '')}_{expiry_date}_P_{strike}",
+                        underlying_symbol=symbol,
+                        strike=strike,
+                        expiration=expiry_date,
+                        option_type=OptionType.PUT,
+                        bid=put_bid,
+                        ask=put_ask,
+                        last_price=(put_bid + put_ask) / 2,
+                        volume=random.randint(50, 500),
+                        open_interest=random.randint(100, 1000),
+                        implied_volatility=iv,
+                        delta=put_delta,
+                        gamma=0.05 * (1 - abs(2 * call_delta - 1)),  # Same gamma for puts
+                        theta=call_theta - 0.03,  # Put theta similar to call theta
+                        vega=current_price * math.sqrt(t) * atm_factor,  # Same vega for puts
+                        underlying_price=current_price
+                    )
+                    option_contracts.append(put)
+            
+            logger.info(f"Created {len(option_contracts)} synthetic option contracts for {symbol}")
+            return option_contracts
+            
+        except Exception as e:
+            logger.error(f"Error creating synthetic options chain for {symbol}: {str(e)}")
+            return []
+    
     async def suggest_option_strategies(
         self,
         symbol: str,

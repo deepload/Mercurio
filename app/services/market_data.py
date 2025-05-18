@@ -188,8 +188,8 @@ class MarketDataService:
     async def get_historical_data(
         self,
         symbol: str,
-        start_date: datetime,
-        end_date: datetime,
+        start_date: Union[datetime, str],
+        end_date: Union[datetime, str],
         timeframe: str = "1d"
     ) -> pd.DataFrame:
         """
@@ -217,14 +217,69 @@ class MarketDataService:
                     alpaca_timeframe = "1Hour"
                 
                 # Get historical data
+                # Ensure start_date and end_date are datetime objects
+                start_dt = start_date
+                end_dt = end_date
+                
+                # Convert string dates to datetime objects if needed
+                if isinstance(start_date, str):
+                    try:
+                        # Try parsing with different formats
+                        try:
+                            start_dt = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            try:
+                                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                            except ValueError:
+                                # If it already has Z at the end, parse ISO format
+                                if start_date.endswith("Z"):
+                                    start_dt = datetime.fromisoformat(start_date.rstrip("Z"))
+                                else:
+                                    start_dt = datetime.fromisoformat(start_date)
+                    except Exception as e:
+                        logger.warning(f"Error parsing start_date string: {e}. Using string as-is.")
+                        start_str = start_date
+                
+                if isinstance(end_date, str):
+                    try:
+                        # Try parsing with different formats
+                        try:
+                            end_dt = datetime.strptime(end_date, "%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            try:
+                                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                            except ValueError:
+                                # If it already has Z at the end, parse ISO format
+                                if end_date.endswith("Z"):
+                                    end_dt = datetime.fromisoformat(end_date.rstrip("Z"))
+                                else:
+                                    end_dt = datetime.fromisoformat(end_date)
+                    except Exception as e:
+                        logger.warning(f"Error parsing end_date string: {e}. Using string as-is.")
+                        end_str = end_date
+                
                 # Format dates per Alpaca's requirements
                 if alpaca_timeframe in ["1Day", "1d"]:
-                    start_str = start_date.strftime("%Y-%m-%d")
-                    end_str = end_date.strftime("%Y-%m-%d")
+                    # Only format if we have datetime objects
+                    if isinstance(start_dt, datetime):
+                        start_str = start_dt.strftime("%Y-%m-%d")
+                    else:
+                        start_str = start_date
+                    if isinstance(end_dt, datetime):
+                        end_str = end_dt.strftime("%Y-%m-%d")
+                    else:
+                        end_str = end_date
                 else:
                     # Use RFC3339 for intraday bars
-                    start_str = start_date.isoformat() + "Z"
-                    end_str = end_date.isoformat() + "Z"
+                    if isinstance(start_dt, datetime):
+                        start_str = start_dt.isoformat() + "Z"
+                    else:
+                        start_str = start_date
+                    if isinstance(end_dt, datetime):
+                        end_str = end_dt.isoformat() + "Z"
+                    else:
+                        end_str = end_date
+                
                 # Détecter si c'est une crypto (format BTC-USD ou BTC/USD)
                 is_crypto = "-USD" in symbol or "/USD" in symbol
                 alpaca_symbol = symbol
