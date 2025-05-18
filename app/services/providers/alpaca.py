@@ -7,7 +7,7 @@ import os
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 import alpaca_trade_api as tradeapi
 import requests
@@ -99,14 +99,14 @@ class AlpacaProvider(MarketDataProvider):
         """Check if extended market data is available (subscription level 2+)."""
         return self.subscription_level >= 2
     
-    async def get_historical_data(self, symbol: str, start_date: datetime, end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
+    async def get_historical_data(self, symbol: str, start_date: Union[datetime, str], end_date: Union[datetime, str], timeframe: str = "1d") -> pd.DataFrame:
         """
         Get historical OHLCV data for a symbol.
         
         Args:
             symbol: The market symbol (e.g., 'AAPL')
-            start_date: Start date for data
-            end_date: End date for data
+            start_date: Start date for data (can be datetime or string in ISO format)
+            end_date: End date for data (can be datetime or string in ISO format)
             timeframe: Timeframe for data (e.g., '1d', '1h')
             
         Returns:
@@ -117,10 +117,18 @@ class AlpacaProvider(MarketDataProvider):
             return pd.DataFrame()
         
         try:
-            # Format dates for API with precise timestamps to ensure fresh data
-            start_str = start_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            end_str = end_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            logger.info(f"AlpacaProvider: Using precise timestamps: {start_str} to {end_str}")
+            # Convert string dates to datetime objects if needed
+            start_dt = start_date
+            end_dt = end_date
+            
+            # Use our specialized date formatter that handles 1d, 5d, etc. correctly
+            # This handles both datetime objects and string dates including relative ones like '1d'
+            start_str = self._format_date_param(start_date)
+            end_str = self._format_date_param(end_date)
+            
+            logger.debug(f"AlpacaProvider: Formatted dates: start={start_str}, end={end_str}")
+            
+            logger.info(f"AlpacaProvider: Using timestamps: {start_str} to {end_str}")
             
             # Map timeframe to Alpaca format
             alpaca_timeframe = timeframe
@@ -140,21 +148,31 @@ class AlpacaProvider(MarketDataProvider):
             # Ensure API call is compatible with installed version
             try:
                 # Try the newer API first
+                # Always make sure our formatted dates are used in the API call
+                formatted_start = self._format_date_param(start_str)
+                formatted_end = self._format_date_param(end_str)
+                
+                logger.debug(f"AlpacaProvider: Making API call with dates: start={formatted_start}, end={formatted_end}")
+                
                 bars = self.client.get_bars(
                     symbol,
                     alpaca_timeframe,
-                    start=start_str,
-                    end=end_str,
+                    start=formatted_start,
+                    end=formatted_end,
                     limit=10000
                 ).df
             except (TypeError, AttributeError):
                 # Fall back to older API if needed
                 logger.info(f"AlpacaProvider: Falling back to older Alpaca API for {symbol}")
+                # Format dates for older API version as well
+                formatted_start = self._format_date_param(start_str)
+                formatted_end = self._format_date_param(end_str)
+                
                 bars = self.client.get_barset(
                     symbols=symbol,
                     timeframe=alpaca_timeframe,
-                    start=start_str,
-                    end=end_str,
+                    start=formatted_start,
+                    end=formatted_end,
                     limit=10000
                 ).df[symbol]
             
@@ -266,6 +284,98 @@ class AlpacaProvider(MarketDataProvider):
     _price_cache_time = {}
     _price_cache_expiry = 5  # seconds - reduced from 60 to enable more frequent price updates
     
+    def _get_from_cache(self, key):
+        """
+        Get a value from the cache if it exists and is not expired.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            The cached value or None if not found or expired
+        """
+        if key in self._price_cache and key in self._price_cache_time:
+            timestamp = self._price_cache_time[key]
+            if (datetime.now() - timestamp).total_seconds() < self._price_cache_expiry:
+                return self._price_cache[key]
+        return None
+        
+    def _add_to_cache(self, key, value, expiry_seconds=None):
+        """
+        Add a value to the cache.
+        
+        Args:
+            key: Cache key
+            value: Value to cache
+            expiry_seconds: Optional custom expiry time in seconds
+        """
+        self._price_cache[key] = value
+        self._price_cache_time[key] = datetime.now()
+        
+        # Set custom expiry if provided
+        if expiry_seconds is not None:
+            # Store the custom expiry with the key
+            self._price_cache_expiry = expiry_seconds
+    
+    def _format_date_param(self, date_param):
+        """
+        Ensures date parameters are in the correct format for Alpaca API calls.
+        Converts string dates like '1d', '5d' into proper ISO format dates.
+        
+        Args:
+            date_param: The date parameter which could be a datetime, a string in ISO format, or a relative timeframe
+            
+        Returns:
+            A properly formatted date string or the original parameter if it's already valid
+        """
+        if isinstance(date_param, datetime):
+            # If it's already a datetime, format it correctly
+            return date_param.strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        if isinstance(date_param, str):
+            # Check if it's a relative timeframe like '1d', '5d', etc.
+            relative_pattern = re.compile(r'^(\d+)([dhwmy])$')
+            match = relative_pattern.match(date_param.lower())
+            
+            if match:
+                # It's a relative time reference
+                amount = int(match.group(1))
+                unit = match.group(2)
+                
+                now = datetime.now()
+                
+                if unit == 'd':  # days
+                    date = now - timedelta(days=amount)
+                elif unit == 'h':  # hours
+                    date = now - timedelta(hours=amount)
+                elif unit == 'w':  # weeks
+                    date = now - timedelta(weeks=amount)
+                elif unit == 'm':  # months (approximate)
+                    date = now - timedelta(days=amount*30)
+                elif unit == 'y':  # years (approximate)
+                    date = now - timedelta(days=amount*365)
+                else:
+                    # No valid unit, return as-is
+                    return date_param
+                    
+                return date.strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            # Check if it's already in ISO format
+            if 'T' in date_param and ('Z' in date_param or '+' in date_param):
+                # Likely already in ISO format
+                return date_param
+                
+            # Try to parse as a simple date
+            try:
+                date = pd.to_datetime(date_param)
+                return date.strftime('%Y-%m-%dT%H:%M:%SZ')
+            except:
+                # If all parsing fails, return as-is
+                return date_param
+        
+        # For any other type, return as-is
+        return date_param
+    
     async def get_latest_price(self, symbol: str) -> float:
         """
         Get the latest price for a symbol.
@@ -342,15 +452,41 @@ class AlpacaProvider(MarketDataProvider):
             return cached_price
             
         try:
-            # Direct API call to quotes endpoint
-            timestamp = datetime.now().timestamp()
-            base_url = f"{self.data_url}/v1beta3/crypto/quotes"
+            # Ensure proper symbol format (BTC/USD)
+            if '/' not in symbol and '-' in symbol:
+                symbol = symbol.replace('-', '/')
             
-            # Request parameters - add timestamp to prevent caching
-            params = {
-                "symbols": symbol,
-                "_nocache": timestamp
-            }
+            # Try multiple endpoints and formats to maximize chances of success
+            methods_to_try = [
+                # Method 1: v1beta3 quotes API (latest Alpaca crypto endpoint)
+                {
+                    'url': f"{self.data_url}/v1beta3/crypto/us/latest/quotes",
+                    'params': {"symbols": symbol},
+                    'parser': lambda data: (data['quotes'][symbol]['ap'] + data['quotes'][symbol]['bp']) / 2 if symbol in data.get('quotes', {}) else None,
+                    'description': 'v1beta3 quotes endpoint'
+                },
+                # Method 2: v1beta3 trades API
+                {
+                    'url': f"{self.data_url}/v1beta3/crypto/us/latest/trades",
+                    'params': {"symbols": symbol},
+                    'parser': lambda data: data['trades'][symbol][0]['p'] if symbol in data.get('trades', {}) and data['trades'][symbol] else None,
+                    'description': 'v1beta3 trades endpoint'
+                },
+                # Method 3: v1beta2 quotes API (older format)
+                {
+                    'url': f"{self.data_url}/v1beta2/crypto/quotes",
+                    'params': {"symbols": symbol},
+                    'parser': lambda data: data['quotes'][symbol][0]['ap'] if symbol in data.get('quotes', {}) and data['quotes'][symbol] else None,
+                    'description': 'v1beta2 quotes endpoint'
+                },
+                # Method 4: v2 latest trade API (for legacy compatibility)
+                {
+                    'url': f"{self.data_url}/v2/stocks/{symbol.replace('/', '')}/trades/latest",
+                    'params': {},
+                    'parser': lambda data: data['trade']['p'] if 'trade' in data else None,
+                    'description': 'v2 trades endpoint'
+                },
+            ]
             
             # Authentication headers
             headers = {
@@ -358,58 +494,46 @@ class AlpacaProvider(MarketDataProvider):
                 "APCA-API-SECRET-KEY": self.alpaca_secret
             }
             
-            # Execute request
-            logger.info(f"AlpacaProvider: Making direct quote API call for {symbol}")
-            response = requests.get(base_url, params=params, headers=headers)
-            
-            # Check response status
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Verify we have data for this symbol
-                if data and "quotes" in data and symbol in data["quotes"] and len(data["quotes"][symbol]) > 0:
-                    # Get the latest quote
-                    quote = data["quotes"][symbol][0]
-                    # Use ask price as the latest price
-                    latest_price = float(quote.get("ap", 0))
+            # Try each method in order
+            for method in methods_to_try:
+                try:
+                    logger.info(f"AlpacaProvider: Making direct API call to {method['description']} for {symbol}")
+                    response = requests.get(method['url'], params=method['params'], headers=headers, timeout=5)
                     
-                    if latest_price > 0:
-                        logger.info(f"{symbol} prix temps réel (cotation): ${latest_price:.4f}")
-                        # Cache for very short time (1 second)
-                        self._add_to_cache(cache_key, latest_price, expiry_seconds=1)
-                        return latest_price
+                    if response.status_code == 200:
+                        data = response.json()
+                        price = method['parser'](data)
+                        
+                        if price and price > 0:
+                            logger.info(f"{symbol} price from {method['description']}: ${price:.4f}")
+                            self._add_to_cache(cache_key, price, expiry_seconds=5)
+                            return price
+                    else:
+                        logger.debug(f"AlpacaProvider: {method['description']} returned {response.status_code}: {response.text[:100]}")
+                except Exception as endpoint_error:
+                    logger.debug(f"AlpacaProvider: Error with {method['description']}: {str(endpoint_error)[:100]}")
+                    continue
             
-            # If direct quote API failed, fall back to trades API
-            base_url = f"{self.data_url}/v1beta3/crypto/trades"
-            response = requests.get(base_url, params=params, headers=headers)
+            # If we get here, all direct API calls failed, try the dedicated crypto data endpoint
+            logger.info(f"AlpacaProvider: Trying dedicated crypto data endpoint for {symbol}")
+            current_price = await self._get_crypto_price_from_bars(symbol)
+            if current_price > 0:
+                logger.info(f"{symbol} price from historical bars: ${current_price:.4f}")
+                self._add_to_cache(cache_key, current_price, expiry_seconds=30)
+                return current_price
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Verify we have data for this symbol
-                if data and "trades" in data and symbol in data["trades"] and len(data["trades"][symbol]) > 0:
-                    # Get the latest trade
-                    trade = data["trades"][symbol][0]
-                    # Use trade price
-                    latest_price = float(trade.get("p", 0))
-                    
-                    if latest_price > 0:
-                        logger.info(f"{symbol} prix temps réel (dernière transaction): ${latest_price:.4f}")
-                        # Cache for very short time
-                        self._add_to_cache(cache_key, latest_price, expiry_seconds=1)
-                        return latest_price
-            
-            # If both realtime methods failed, fall back to the historical method
-            logger.warning(f"AlpacaProvider: Real-time quote not available for {symbol}, falling back to bars")
-            return await self._get_crypto_price_from_bars(symbol)
+            # If everything fails, log a clear error message    
+            logger.error(f"AlpacaProvider: Failed to get crypto price for {symbol} after trying all methods")
+            return 0.0
         except Exception as e:
-            logger.warning(f"AlpacaProvider: Error getting real-time price: {str(e)}")
+            logger.error(f"AlpacaProvider: Error getting real-time price: {str(e)}")
             # Fall back to the historical method
             return await self._get_crypto_price_from_bars(symbol)
             
     async def _get_crypto_price_from_bars(self, symbol: str) -> float:
         """
         Fallback method to get crypto price from historical bars when real-time fails.
+        This method tries multiple approaches and APIs to maximize success with Alpaca.
         
         Args:
             symbol: The crypto symbol (e.g., 'BTC/USD')
@@ -418,30 +542,120 @@ class AlpacaProvider(MarketDataProvider):
             The latest bar price as a float
         """
         try:
-            # For crypto fallback, use the historical data approach
+            # Ensure proper symbol format
+            if '/' not in symbol and '-' in symbol:
+                symbol = symbol.replace('-', '/')
+            
+            # Make direct API call to Alpaca's v1beta3 bars endpoint (most reliable for crypto)
             end = datetime.now()
-            start = end - timedelta(minutes=5)  # Look back just 5 minutes to get freshest data
+            start = end - timedelta(minutes=30)  # Look back 30 minutes to ensure we get data
+            end_str = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+            start_str = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+            #Mytest
+            # Try direct API call to v1beta3 bars endpoint first
+            urls_to_try = [
+                # Primary endpoint - v1beta3/crypto/us/bars
+                {
+                    'url': f"{self.data_url}/v1beta3/crypto/us/bars",
+                    'params': {
+                        "symbols": symbol,
+                        "timeframe": "1Min",
+                        "start": start_str,
+                        "end": end_str,
+                        "limit": 1
+                    },
+                    'parser': lambda data: float(data['bars'][symbol][0]['c']) if symbol in data.get('bars', {}) and data['bars'][symbol] else None,
+                    'description': 'v1beta3 crypto bars endpoint'
+                },
+                # Secondary endpoint - v2/stocks/{symbol}/bars
+                {
+                    'url': f"{self.data_url}/v2/stocks/{symbol.replace('/', '')}/bars",
+                    'params': {
+                        "timeframe": "1Min",
+                        "start": start_str,
+                        "end": end_str,
+                        "limit": 1
+                    },
+                    'parser': lambda data: float(data['bars'][0]['c']) if 'bars' in data and data['bars'] else None,
+                    'description': 'v2 stock bars endpoint (legacy)'
+                },
+                # Tertiary endpoint - v1beta2/crypto/bars
+                {
+                    'url': f"{self.data_url}/v1beta2/crypto/bars",
+                    'params': {
+                        "symbols": symbol,
+                        "timeframe": "1Min",
+                        "start": start_str,
+                        "end": end_str,
+                        "limit": 1
+                    },
+                    'parser': lambda data: float(data['bars'][symbol][0]['c']) if symbol in data.get('bars', {}) and data['bars'][symbol] else None,
+                    'description': 'v1beta2 crypto bars endpoint'
+                },
+            ]
             
-            # Try with different timeframes if needed
-            timeframes = ["1Min", "5Min", "1Day"]
+            # Headers for API calls
+            headers = {
+                "APCA-API-KEY-ID": self.alpaca_key,
+                "APCA-API-SECRET-KEY": self.alpaca_secret
+            }
             
-            for timeframe in timeframes:
+            # Try each endpoint
+            for endpoint in urls_to_try:
                 try:
-                    bars = await self.get_historical_data(symbol, start, end, timeframe)
-                    if not bars.empty:
-                        # Get the latest bar's closing price
-                        latest_price = float(bars['close'].iloc[-1])
-                        logger.info(f"{symbol} prix (barre historique): ${latest_price:.4f}")
-                        return latest_price
-                except Exception as e:
+                    logger.info(f"AlpacaProvider: Trying {endpoint['description']} for {symbol}")
+                    response = requests.get(endpoint['url'], params=endpoint['params'], headers=headers, timeout=10)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        price = endpoint['parser'](data)
+                        
+                        if price and price > 0:
+                            logger.info(f"{symbol} price from {endpoint['description']}: ${price:.4f}")
+                            return price
+                    else:
+                        logger.debug(f"AlpacaProvider: {endpoint['description']} returned {response.status_code}: {response.text[:100]}")
+                except Exception as endpoint_error:
+                    logger.debug(f"AlpacaProvider: Error with {endpoint['description']}: {str(endpoint_error)[:100]}")
                     continue
             
-            # If all attempts fail
-            logger.error(f"AlpacaProvider: Could not get any price data for {symbol}")
+            # If all API calls fail, try the standard historical data method through self.get_historical_data
+            timeframes = ["1Min", "5Min", "1Day"]
+            for timeframe in timeframes:
+                try:
+                    # Always use proper datetime objects here, not strings
+                    # Ensure we're using datetime objects for start and end parameters
+                    now = datetime.now()
+                    past = now - timedelta(minutes=60)  # Look back 60 minutes to ensure we get enough data
+                    
+                    logger.info(f"AlpacaProvider: Trying to get {timeframe} bars for {symbol} from {past.isoformat()} to {now.isoformat()}")
+                    bars = await self.get_historical_data(symbol, past, now, timeframe)
+                    if not bars.empty:
+                        latest_price = float(bars['close'].iloc[-1])
+                        logger.info(f"{symbol} price from historical {timeframe} bars: ${latest_price:.4f}")
+                        return latest_price
+                except Exception as e:
+                    logger.debug(f"AlpacaProvider: Failed to get {timeframe} bars for {symbol}: {str(e)[:100]}")
+                    continue
+            
+            # Last resort: try to get snapshot price from v2 snapshot endpoint
+            try:
+                snapshot_url = f"{self.data_url}/v2/stocks/{symbol.replace('/', '')}/snapshot"
+                response = requests.get(snapshot_url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'latestTrade' in data and 'p' in data['latestTrade']:
+                        price = float(data['latestTrade']['p'])
+                        logger.info(f"{symbol} price from snapshot: ${price:.4f}")
+                        return price
+            except Exception as e:
+                pass
+            
+            # If all attempts fail, log clear error and return 0
+            logger.error(f"AlpacaProvider: Could not get any price data for {symbol} after trying all endpoints")
             return 0.0
         except Exception as e:
             logger.error(f"AlpacaProvider: Error in fallback price fetch: {str(e)}")
-            return 0.0
             return 0.0
 
     async def get_market_symbols(self, market_type: str = "stock") -> List[str]:

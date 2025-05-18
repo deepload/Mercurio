@@ -30,10 +30,27 @@ sys.path.insert(0, project_root)
 # Charger les variables d'environnement
 load_dotenv()
 
-# Obtenir la liste de symboles personnalisés depuis .env ou utiliser une liste par défaut
+# Charger la liste de symboles personnalisés depuis le CSV si --use-custom-symbols est passé
+import csv
+CUSTOM_SYMBOLS_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "all_crypto_20250511.csv")
 default_crypto_list = "BTC/USD,ETH/USD,SOL/USD,DOT/USD,AVAX/USD,ADA/USD,XRP/USD,LUNA/USD,DOGE/USD,MATIC/USD,LINK/USD,LTC/USD,UNI/USD,ALGO/USD,ATOM/USD,FIL/USD,AAVE/USD,MKR/USD,COMP/USD,SNX/USD,BAT/USD,YFI/USD,CRV/USD,GRT/USD,UMA/USD,ZRX/USD"
 custom_crypto_list_str = os.getenv("PERSONALIZED_CRYPTO_LIST", default_crypto_list)
 PERSONALIZED_CRYPTO_OPTIONS_LIST = [s.strip() for s in custom_crypto_list_str.split(',')]
+
+def load_custom_symbols_from_csv():
+    symbols = []
+    try:
+        with open(CUSTOM_SYMBOLS_CSV, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                symbol = row.get('symbol')
+                if symbol:
+                    # Convert to Alpaca format if needed (BTC-USD -> BTC/USD)
+                    symbol = symbol.replace('-', '/').upper()
+                    symbols.append(symbol)
+    except Exception as e:
+        logger.warning(f"Impossible de charger le CSV de symboles personnalisés: {e}")
+    return symbols
 
 from app.services.market_data import MarketDataService
 from app.services.options_service import OptionsService
@@ -136,8 +153,11 @@ async def run_crypto_options_trader(args):
     
     # Add custom symbols support
     if args.use_custom_symbols:
-        crypto_symbols = PERSONALIZED_CRYPTO_OPTIONS_LIST
-        logger.info(f"Utilisation de la liste personnalisée de {len(crypto_symbols)} cryptomonnaies depuis .env")
+        crypto_symbols = load_custom_symbols_from_csv()
+        logger.info(f"Utilisation de la liste personnalisée de {len(crypto_symbols)} cryptomonnaies depuis CSV: {CUSTOM_SYMBOLS_CSV}")
+        if not crypto_symbols:
+            logger.error(f"Aucun symbole personnalisé trouvé dans le CSV {CUSTOM_SYMBOLS_CSV}. Abandon.")
+            return
     else:
         if not args.symbols:
             logger.error("Erreur: Vous devez spécifier des symboles avec --symbols ou utiliser --use-custom-symbols")
@@ -518,9 +538,16 @@ async def run_crypto_options_trader(args):
         logger.info("Trading interrupted by user")
     
     finally:
-        # Close all positions at the end
-        logger.info("Closing any remaining positions...")
-        await trading_service.close_all_positions()
+        # Print open positions summary at the end
+        logger.info("Fetching any remaining open positions...")
+        try:
+            open_positions = await trading_service.get_positions()
+            if open_positions:
+                logger.info(f"Positions ouvertes restantes: {open_positions}")
+            else:
+                logger.info("Aucune position ouverte restante.")
+        except Exception as e:
+            logger.warning(f"Impossible de récupérer les positions ouvertes: {e}")
         
         # Print trading summary
         logger.info("Trading completed")

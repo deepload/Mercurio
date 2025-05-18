@@ -1206,44 +1206,6 @@ def main():
 # Variable globale pour stocker l'instance du trader
 trader_instance = None
 
-# Fonction pour liquider toutes les positions
-def liquidate_positions():
-    """Liquider toutes les positions ouvertes"""
-    logger.info("Exécution du script de liquidation des positions...")
-    try:
-        # Chemin vers le script de liquidation
-        liquidation_script = os.path.join(os.path.dirname(__file__), "liquidate_all_positions.py")
-        
-        # Vérifier que le script existe
-        if not os.path.exists(liquidation_script):
-            logger.error(f"Script de liquidation introuvable: {liquidation_script}")
-            return
-        
-        # Exécuter le script de liquidation avec les options --force et --yes pour assurer la liquidation
-        # --force : essaie des méthodes alternatives pour les positions problématiques comme les cryptos
-        # --yes : saute la confirmation manuelle
-        # --crypto-only : nous sommes dans le trader crypto, donc cibler uniquement les cryptos
-        import subprocess
-        cmd = [sys.executable, liquidation_script, "--force", "--yes", "--crypto-only"]
-        logger.info(f"Commande: {' '.join(cmd)}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        # Vérifier si la commande a réussi
-        if result.returncode == 0:
-            logger.info("Liquidation des positions terminée avec succès")
-            if result.stdout:
-                # Afficher les détails importants (uniquement les lignes de log importantes)
-                for line in result.stdout.splitlines():
-                    if "INFO" in line and ("liquid" in line.lower() or "position" in line.lower() or "error" in line.lower()):
-                        logger.info(f"Détail: {line.strip()}")
-        else:
-            logger.error(f"Erreur pendant la liquidation. Code: {result.returncode}")
-            logger.error(f"Détails: {result.stderr}")
-        
-    except Exception as e:
-        logger.error(f"Erreur lors de la liquidation des positions: {e}")
-        logger.error(f"Type d'erreur: {type(e).__name__}")
 
 # Fonction pour générer un rapport final et nettoyer
 def cleanup_resources():
@@ -1267,7 +1229,6 @@ def run_crypto_trader():
     # Enregistrement des fonctions de nettoyage pour l'utilitaire d'arrêt propre
     if USE_GRACEFUL_EXIT:
         register_cleanup(cleanup_resources)
-        register_liquidation_handler(liquidate_positions)
     else:
         # Enregistrement du gestionnaire de signal pour un arrêt propre (solution de secours)
         signal.signal(signal.SIGINT, signal_handler)
