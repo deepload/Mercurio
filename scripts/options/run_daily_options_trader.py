@@ -48,8 +48,10 @@ def parse_arguments():
                                 'IRON_CONDOR', 'BUTTERFLY', 'MIXED'],
                         help='Options strategy to use')
                         
-    parser.add_argument('--symbols', type=str, nargs='+', required=True,
+    parser.add_argument('--symbols', type=str, nargs='+', required=False,
                         help='Symbols to trade options for')
+    parser.add_argument('--symbols-file', type=str, required=False,
+                        help='Path to a file containing symbols to trade options for (one per line or comma-separated)')
                         
     parser.add_argument('--capital', type=float, default=100000.0,
                         help='Total capital to allocate for options trading')
@@ -78,7 +80,29 @@ def parse_arguments():
     parser.add_argument('--duration', type=int, default=1,
                         help='Trading duration in days')
                         
-    return parser.parse_args()
+    args = parser.parse_args()
+    # Load symbols from file if provided
+    symbols = set(args.symbols) if args.symbols else set()
+    if args.symbols_file:
+        import os
+        import csv
+        if not os.path.exists(args.symbols_file):
+            parser.error(f"Symbols file not found: {args.symbols_file}")
+        with open(args.symbols_file, 'r') as f:
+            reader = csv.reader(f)
+            for i, row in enumerate(reader):
+                if i == 0 and row and 'symbol' in row[0].lower():
+                    continue  # skip header
+                if not row or not row[0].strip():
+                    continue
+                symbol = row[0].strip().upper()
+                # Only add if symbol looks like a valid ticker (letters only, 1-6 chars)
+                if symbol.isalpha() and 1 <= len(symbol) <= 6:
+                    symbols.add(symbol)
+    if not symbols:
+        parser.error("You must provide at least one symbol via --symbols or --symbols-file.")
+    args.symbols = list(symbols)
+    return args
 
 
 def get_strategy_class(strategy_name: str):

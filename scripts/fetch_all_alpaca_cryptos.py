@@ -21,12 +21,17 @@ def get_all_alpaca_cryptos():
     """Récupère toutes les cryptomonnaies disponibles sur Alpaca"""
     try:
         # Récupérer les clés API
-        api_key = os.getenv('ALPACA_API_KEY')
-        api_secret = os.getenv('ALPACA_API_SECRET')
-        
+        # Support both legacy and new env variable names
+        api_key = os.getenv('ALPACA_API_KEY') or os.getenv('ALPACA_KEY')
+        api_secret = os.getenv('ALPACA_API_SECRET') or os.getenv('ALPACA_SECRET')
+
         if not api_key or not api_secret:
-            logger.error("Clés API Alpaca non définies dans le fichier .env")
+            logger.error("Clés API Alpaca non définies dans le fichier .env (ALPACA_API_KEY/ALPACA_KEY et ALPACA_API_SECRET/ALPACA_SECRET)")
             return []
+        elif os.getenv('ALPACA_API_KEY') and os.getenv('ALPACA_API_SECRET'):
+            logger.info("Using ALPACA_API_KEY and ALPACA_API_SECRET from .env")
+        else:
+            logger.info("Using ALPACA_KEY and ALPACA_SECRET from .env")
         
         # Créer une connexion à l'API Alpaca
         logger.info("Connexion à l'API Alpaca...")
@@ -35,9 +40,20 @@ def get_all_alpaca_cryptos():
         # Récupérer tous les assets disponibles
         assets = api.list_assets()
         
-        # Filtrer pour ne garder que les cryptomonnaies
-        crypto_assets = [asset for asset in assets if asset.asset_class == 'crypto']
-        
+        # Filtrer pour ne garder que les cryptomonnaies (compatibilité Alpaca SDK et _raw['class'])
+        crypto_assets = [
+            asset for asset in assets
+            if (
+                getattr(asset, 'asset_class', None) == 'crypto'
+                or getattr(asset, 'class_', None) == 'crypto'
+                or (hasattr(asset, '_raw') and asset._raw.get('class') == 'crypto')
+            )
+        ]
+
+        if not crypto_assets and assets:
+            logger.warning("Aucun asset avec 'asset_class', 'class_' ou _raw['class'] == 'crypto'. Voici les attributs du premier asset pour debug:")
+            logger.warning(vars(assets[0]))
+
         # Récupérer les symboles
         crypto_symbols = []
         for asset in crypto_assets:
@@ -124,13 +140,11 @@ if __name__ == "__main__":
         if save_crypto_lists(crypto_assets):
             logger.info("Les listes ont été sauvegardées avec succès dans le dossier 'data'")
             
-            # Afficher les 10 premières cryptos négociables
-            logger.info("Voici les 10 premières cryptomonnaies négociables:")
-            count = 0
+            # Afficher toutes les cryptos négociables
+            logger.info("Liste complète des cryptomonnaies négociables:")
             for asset in crypto_assets:
-                if asset['tradable'] and count < 10:
+                if asset['tradable']:
                     logger.info(f"  - {asset['symbol']} ({asset['name']})")
-                    count += 1
         else:
             logger.error("Échec de la sauvegarde des listes")
     else:
