@@ -136,15 +136,18 @@ class OptionsStrategyAdapter:
             )
             
         elif strategy_name == 'IRON_CONDOR':
+            # Map parameters to match IronCondorStrategy signature
             iron_condor_kwargs = {
                 'max_position_size': max_position_size,
-                'days_to_expiration': days_to_expiration,
+                'max_days_to_expiry': days_to_expiration,  # Map to max_days_to_expiry
+                'min_days_to_expiry': max(5, days_to_expiration - 10),  # Provide a reasonable min_days_to_expiry
                 'profit_target_pct': profit_target_pct,
                 'stop_loss_pct': stop_loss_pct
             }
             try:
                 strategy = IronCondorStrategy(
                     underlying_symbol=symbol,
+                    account_size=account_size,
                     **iron_condor_kwargs
                 )
             except TypeError as e:
@@ -152,9 +155,10 @@ class OptionsStrategyAdapter:
                 logger.warning(f"Adaptation pour IronCondorStrategy: {e}")
                 strategy = IronCondorStrategy(
                     symbol=symbol,
+                    account_size=account_size,
                     **iron_condor_kwargs
                 )
-            
+        
         elif strategy_name == 'BUTTERFLY':
             butterfly_kwargs = {
                 'max_position_size': max_position_size,

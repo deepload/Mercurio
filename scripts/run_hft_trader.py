@@ -683,7 +683,9 @@ class HFTrader:
                 await self.manage_positions()
                 
                 # Analyser les symboles pour de nouveaux signaux
+                logger.debug(f"Début de l'analyse des symboles. Nombre de symboles: {len(self.symbols)}")
                 await self.analyze_symbols()
+                logger.debug("Fin de l'analyse des symboles.")
                 
                 # Afficher périodiquement le solde disponible (toutes les 10 itérations)
                 balance_check_counter += 1
@@ -1155,16 +1157,20 @@ class HFTrader:
     async def analyze_symbols(self):
         """Analyser tous les symboles pour des opportunités de trading"""
         for symbol in self.symbols:
+            logger.debug(f"Analyse du symbole: {symbol}")
             await self.analyze_symbol(symbol)
     
     async def analyze_symbol(self, symbol):
         """Analyser un symbole spécifique pour signal de trading"""
         # Vérifier si on a suffisamment de données
         if len(self.price_data[symbol]) < 20:  # Minimum requis pour la plupart des stratégies
+            logger.debug(f"Pas assez de données pour {symbol} (n={len(self.price_data[symbol])})")
             return
         
         # Vérifier si on peut trader ce symbole (fréquence de trade limitée)
-        if (datetime.now() - self.last_trade_time[symbol]).total_seconds() < MAX_TRADE_FREQUENCY:
+        since_last_trade = (datetime.now() - self.last_trade_time[symbol]).total_seconds()
+        if since_last_trade < MAX_TRADE_FREQUENCY:
+            logger.debug(f"Fréquence de trade limitée pour {symbol}: {since_last_trade:.2f}s < {MAX_TRADE_FREQUENCY}s")
             return
         
         # Convertir les données pour l'analyse
@@ -1176,6 +1182,7 @@ class HFTrader:
         if self.strategy_type == StrategyType.MOVING_AVERAGE:
             if self.strategies[self.strategy_type]:
                 strategy_result = self.strategies[self.strategy_type].get_signal(symbol, df)
+                logger.debug(f"Signal MOVING_AVERAGE pour {symbol}: {strategy_result}")
                 signal = {
                     "action": strategy_result["action"],
                     "confidence": strategy_result["confidence"],
@@ -1185,6 +1192,7 @@ class HFTrader:
         elif self.strategy_type == StrategyType.MOVING_AVERAGE_ML:
             if self.strategies[self.strategy_type]:
                 strategy_result = self.strategies[self.strategy_type].get_signal(symbol, df)
+                logger.debug(f"Signal MOVING_AVERAGE_ML pour {symbol}: {strategy_result}")
                 signal = {
                     "action": strategy_result["action"],
                     "confidence": strategy_result["confidence"],
@@ -1193,16 +1201,22 @@ class HFTrader:
         
         elif self.strategy_type == StrategyType.MEAN_REVERSION:
             signal = await self.mean_reversion_strategy(symbol, df)
+            logger.debug(f"Signal MEAN_REVERSION pour {symbol}: {signal}")
         
         elif self.strategy_type == StrategyType.MOMENTUM:
             signal = await self.momentum_strategy(symbol, df)
+            logger.debug(f"Signal MOMENTUM pour {symbol}: {signal}")
         
         elif self.strategy_type == StrategyType.ORDERBOOK_IMBALANCE:
             signal = await self.orderbook_imbalance_strategy(symbol)
+            logger.debug(f"Signal ORDERBOOK_IMBALANCE pour {symbol}: {signal}")
         
         # Exécuter le signal si valide
         if signal and signal.get("action") is not None:
+            logger.info(f"Signal valide pour {symbol}: action={signal.get('action')}, confiance={signal.get('confidence')}, raison={signal.get('reason')}")
             await self.execute_signal(symbol, signal)
+        else:
+            logger.debug(f"Aucun signal valide pour {symbol} ou action=None. Signal: {signal}")
     
     def _prepare_dataframe(self, symbol) -> pd.DataFrame:
         """Préparer un DataFrame pandas à partir des données historiques"""
@@ -1479,6 +1493,7 @@ class HFTrader:
             
         # Déterminer le type d'action
         action = signal.get("action")
+        logger.debug(f"Type d'action pour {symbol}: {action}")
         
         if action == TradeAction.BUY:
             # Vérifier si on a déjà une position sur ce symbole
@@ -1493,10 +1508,13 @@ class HFTrader:
                 
             # Calculer la quantité à acheter
             quantity = await self._calculate_position_size(symbol)
+            logger.debug(f"Quantité calculée à acheter pour {symbol}: {quantity}")
             if quantity <= 0:
+                logger.info(f"Quantité calculée nulle ou négative pour {symbol}: {quantity}")
                 return
                 
             # Exécuter l'achat
+            logger.info(f"Envoi d'un ordre d'achat pour {symbol}, quantité={quantity}")
             await self.execute_order(symbol, "buy", quantity, signal.get("reason", "Signal d'achat"))
             
         elif action == TradeAction.SELL:
@@ -1504,18 +1522,23 @@ class HFTrader:
             if symbol in self.positions and self.positions[symbol]['qty'] > 0:
                 # Vendre toute la position
                 quantity = self.positions[symbol]['qty']
+                logger.info(f"Envoi d'un ordre de vente pour {symbol}, quantité={quantity}")
                 await self.execute_order(symbol, "sell", quantity, signal.get("reason", "Signal de vente"))
                 
             # Ou vérifier si on veut ouvrir une position short (si permis par le compte)
             elif self._is_shorting_enabled() and signal.get("confidence", 0) > 0.8:
                 quantity = await self._calculate_position_size(symbol)
+                logger.debug(f"Quantité calculée pour short sur {symbol}: {quantity}")
                 if quantity <= 0:
+                    logger.info(f"Quantité calculée nulle ou négative pour short sur {symbol}: {quantity}")
                     return
                     
+                logger.info(f"Envoi d'un ordre short pour {symbol}, quantité={quantity}")
                 await self.execute_order(symbol, "sell", quantity, signal.get("reason", "Signal de vente à découvert"))
         
         # Mettre à jour le timestamp du dernier trade pour limiter la fréquence
         self.last_trade_time[symbol] = datetime.now()
+        logger.debug(f"Timestamp du dernier trade mis à jour pour {symbol}")
     
     async def _check_balance(self, symbol: str, side: str, quantity: float) -> bool:
         """Vérifier si le solde est suffisant pour l'ordre"""
@@ -2518,26 +2541,40 @@ def main():
     
     # Charger les symboles depuis un fichier si spécifié
     if args.custom_symbols_file and args.use_custom_symbols:
+        import csv
         try:
-            with open(args.custom_symbols_file, 'r') as f:
-                file_symbols = [line.strip() for line in f.readlines() if line.strip()]
-                if file_symbols:
-                    # S'assurer que tous les symboles sont au format avec slash (BTC/USD)
-                    processed_symbols = []
-                    for symbol in file_symbols:
-                        if "/" not in symbol and symbol.endswith("USD"):
-                            # Convertir BTCUSD en BTC/USD
-                            symbol_base = symbol[:-3]  # Supprimer "USD"
-                            processed_symbol = f"{symbol_base}/USD"
-                            logger.info(f"Conversion du symbole: {symbol} -> {processed_symbol}")
-                            processed_symbols.append(processed_symbol)
-                        else:
-                            processed_symbols.append(symbol)
-                    
-                    symbols = processed_symbols
-                    logger.info(f"Symboles chargés depuis {args.custom_symbols_file}: {len(symbols)} symboles")
-                else:
-                    logger.warning(f"Aucun symbole trouvé dans {args.custom_symbols_file}, utilisation des symboles en ligne de commande")
+            symbols_from_file = []
+            if args.custom_symbols_file.lower().endswith('.csv'):
+                with open(args.custom_symbols_file, 'r', newline='') as f:
+                    reader = csv.reader(f)
+                    # Try to skip header if present
+                    first_row = next(reader, None)
+                    if first_row and ("symbol" in first_row[0].lower() or "ticker" in first_row[0].lower()):
+                        pass  # header detected, skip
+                    else:
+                        if first_row:
+                            symbols_from_file.append(first_row[0].strip())
+                    for row in reader:
+                        if row and row[0].strip():
+                            symbols_from_file.append(row[0].strip())
+            else:
+                with open(args.custom_symbols_file, 'r') as f:
+                    symbols_from_file = [line.strip() for line in f if line.strip()]
+
+            if symbols_from_file:
+                processed_symbols = []
+                for symbol in symbols_from_file:
+                    if "/" not in symbol and symbol.endswith("USD"):
+                        symbol_base = symbol[:-3]
+                        processed_symbol = f"{symbol_base}/USD"
+                        logger.info(f"Conversion du symbole: {symbol} -> {processed_symbol}")
+                        processed_symbols.append(processed_symbol)
+                    else:
+                        processed_symbols.append(symbol)
+                symbols = processed_symbols
+                logger.info(f"Symboles chargés depuis {args.custom_symbols_file}: {len(symbols)} symboles")
+            else:
+                logger.warning(f"Aucun symbole trouvé dans {args.custom_symbols_file}, utilisation des symboles en ligne de commande")
         except Exception as e:
             logger.error(f"Erreur lors du chargement des symboles depuis {args.custom_symbols_file}: {e}")
             logger.info("Utilisation des symboles spécifiés en ligne de commande")

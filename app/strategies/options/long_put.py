@@ -17,6 +17,10 @@ from app.strategies.options.base_options_strategy import BaseOptionsStrategy
 logger = logging.getLogger(__name__)
 
 class LongPutStrategy(BaseOptionsStrategy):
+    @property
+    def broker(self):
+        return self.broker_adapter
+
     """
     Implementation of the Long Put strategy.
     
@@ -85,6 +89,8 @@ class LongPutStrategy(BaseOptionsStrategy):
         self.position_size: int = 0
         self.entry_premium: float = 0
         self.max_drawdown: float = 0
+        # Ensure broker_adapter is accessible as broker for compatibility
+        # (Handled by @property above)
         
     async def should_enter(self, market_data: pd.DataFrame) -> bool:
         """
@@ -565,8 +571,13 @@ class LongPutStrategy(BaseOptionsStrategy):
             bearish_candles = sum(1 for i in range(len(recent_candles)) if recent_candles['close'].iloc[i] < recent_candles['open'].iloc[i])
             momentum_bearish = bearish_candles >= 3  # At least 3 out of 5 recent candles are bearish
             
-            # For Long Put, we want to buy puts when the market is bearish
-            # and not oversold
+            logger.info(f"{self.underlying_symbol}: downtrend={downtrend}, rsi_ok={rsi_ok} (RSI={last_rsi:.2f}), momentum_bearish={momentum_bearish} (bearish_candles={bearish_candles})")
+            if not downtrend:
+                logger.info(f"{self.underlying_symbol}: Downtrend condition not met (close={last_close}, sma50={last_sma50}, sma200={last_sma200})")
+            if not rsi_ok:
+                logger.info(f"{self.underlying_symbol}: RSI condition not met (RSI={last_rsi:.2f})")
+            if not momentum_bearish:
+                logger.info(f"{self.underlying_symbol}: Momentum condition not met (bearish_candles={bearish_candles})")
             return downtrend and rsi_ok and momentum_bearish
             
         except Exception as e:

@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional, Union
 
 import alpaca_trade_api as tradeapi
 import requests
+import re
 
 from app.services.providers.base import MarketDataProvider
 
@@ -44,8 +45,11 @@ class AlpacaProvider(MarketDataProvider):
             self.base_url = os.getenv("ALPACA_PAPER_URL", "https://paper-api.alpaca.markets")
             logger.info("AlpacaProvider: Configured for PAPER trading mode")
         
-        # Data URL is the same for both modes
+        # Data URLs for stocks/options and crypto
         self.data_url = os.getenv("ALPACA_DATA_URL", "https://data.alpaca.markets")
+        self.crypto_data_url = os.getenv("ALPACA_CRYPTO_DATA_URL", "https://data.alpaca.markets/v1beta3/crypto")
+        if not self.crypto_data_url:
+            logger.warning("AlpacaProvider: ALPACA_CRYPTO_DATA_URL not set in environment. Crypto data may fail.")
         
         # Subscription level (default to 1 if not specified)
         self.subscription_level = int(os.getenv("ALPACA_SUBSCRIPTION_LEVEL", "1"))
@@ -137,10 +141,12 @@ class AlpacaProvider(MarketDataProvider):
             elif timeframe == "1h":
                 alpaca_timeframe = "1Hour"
             
-            # Check if it's a crypto symbol (contains '/')
-            if '/' in symbol:
-                logger.info(f"AlpacaProvider: Detected crypto symbol {symbol}, using crypto data API")
-                return await self._get_crypto_data(symbol, start_str, end_str, alpaca_timeframe)
+            # Check if it's a crypto symbol (contains '/' or '-')
+            if '/' in symbol or '-' in symbol:
+                # Format symbol for Alpaca crypto API (BTC/USD)
+                crypto_symbol = symbol.replace('-', '/')
+                logger.info(f"AlpacaProvider: Detected crypto symbol {symbol}, using crypto data API with formatted symbol {crypto_symbol}")
+                return await self._get_crypto_data(crypto_symbol, start_str, end_str, alpaca_timeframe)
             
             # Default path for stocks
             logger.info(f"AlpacaProvider: Fetching historical data for {symbol} from {start_str} to {end_str} with timeframe {alpaca_timeframe}")
@@ -209,8 +215,8 @@ class AlpacaProvider(MarketDataProvider):
             DataFrame with crypto data
         """
         try:
-            # Use the crypto API endpoint format
-            base_url = f"{self.data_url}/v1beta3/crypto/bars"
+            # Use the crypto data URL from .env
+            base_url = f"{getattr(self, 'crypto_data_url', os.getenv('ALPACA_CRYPTO_DATA_URL', 'https://data.alpaca.markets'))}/v1beta3/crypto/bars"
             
             # Map timeframe to v1beta3 format
             v1beta3_timeframe = timeframe
@@ -221,7 +227,7 @@ class AlpacaProvider(MarketDataProvider):
             
             # Request parameters
             params = {
-                "symbols": symbol,
+                "symbols": symbol,  # symbol should already be formatted as BTC/USD
                 "timeframe": v1beta3_timeframe,
                 "start": start_str,
                 "end": end_str,
@@ -236,7 +242,7 @@ class AlpacaProvider(MarketDataProvider):
             }
             
             # Execute request
-            logger.info(f"AlpacaProvider: Making direct API call to Alpaca crypto endpoint for {symbol}")
+            logger.info(f"AlpacaProvider: Making direct API call to Alpaca crypto endpoint for {symbol} at {base_url}")
             response = requests.get(base_url, params=params, headers=headers)
             
             # Check response status

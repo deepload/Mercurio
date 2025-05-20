@@ -132,36 +132,61 @@ class MarketDataProviderFactory:
         """
         return list(self._provider_classes.keys())
     
-    def get_default_provider(self) -> MarketDataProvider:
+    def get_default_provider(self, symbol: str = None) -> MarketDataProvider:
         """
         Get the default provider based on availability and priority.
-        
+        If a symbol is provided and it is a crypto symbol (contains '-' or '/'),
+        skip Alpaca as a provider unless explicitly requested, to avoid 404 errors
+        for users without crypto access. Polygon and Yahoo will be prioritized for crypto,
+        then fallback to SampleDataProvider.
+
+        Args:
+            symbol: Optional. The symbol to fetch data for. If it's a crypto symbol, Alpaca is skipped.
+
         Returns:
             Default provider instance
         """
-        if self._default_provider:
+        if self._default_provider and (symbol is None):
             return self._default_provider
-            
+
+        # Detect if this is a crypto symbol
+        is_crypto = False
+        if symbol is not None:
+            # Crypto symbols typically contain '-' (BTC-USD) or '/' (BTC/USD)
+            if ('-' in symbol or '/' in symbol):
+                is_crypto = True
+
         # Get all provider names sorted by priority
         provider_names = sorted(
             self._provider_priorities.keys(),
             key=lambda name: self._provider_priorities[name]
         )
-        
-        # Try to initialize each provider in priority order
+
+        # If crypto, skip Alpaca unless explicitly requested
         for name in provider_names:
+            if is_crypto and name == "alpaca":
+                logger.info("Skipping Alpaca as provider for crypto symbol {} due to known 404 issues for most users".format(symbol))
+                continue
             provider = self.get_provider(name)
             if provider:
-                self._default_provider = provider
-                logger.info(f"Using '{name}' as default provider")
+                # Only set as default if not crypto, else return directly for crypto
+                if not is_crypto:
+                    self._default_provider = provider
+                logger.info(f"Using '{name}' as default provider" + (f" for {symbol}" if symbol else ""))
                 return provider
-        
+
         # If all else fails, use sample data provider
         sample_provider = self.get_provider("sample")
         if not sample_provider:
             sample_provider = SampleDataProvider()
             self._providers["sample"] = sample_provider
-            
-        self._default_provider = sample_provider
-        logger.info("Using sample data provider as default")
+
+        if not is_crypto:
+            self._default_provider = sample_provider
+        logger.info("Using sample data provider as default" + (f" for {symbol}" if symbol else ""))
         return sample_provider
+
+    # For backward compatibility, keep the old signature for existing code
+    def get_default_provider_no_symbol(self) -> MarketDataProvider:
+        return self.get_default_provider(symbol=None)
+

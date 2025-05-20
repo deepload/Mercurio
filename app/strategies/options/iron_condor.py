@@ -18,6 +18,10 @@ from app.strategies.options.base_options_strategy import BaseOptionsStrategy
 logger = logging.getLogger(__name__)
 
 class IronCondorStrategy(BaseOptionsStrategy):
+    @property
+    def broker(self):
+        return getattr(self, 'broker_adapter', None)
+
     """
     Implementation of the Iron Condor strategy.
     
