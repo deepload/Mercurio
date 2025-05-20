@@ -203,82 +203,62 @@ async def run_options_trader(args):
     
     logger.info(f"Trading will run until: {end_time}")
     
+    semaphore = asyncio.Semaphore(10)  # Limit concurrent API calls (tune as needed)
+    async def handle_strategy(strategy):
+        nonlocal position_count
+        symbol = getattr(strategy, 'underlying_symbol', None)
+        if symbol is None and hasattr(strategy, 'symbol'):
+            symbol = strategy.symbol
+        elif symbol is None and hasattr(strategy, 'ticker'):
+            symbol = strategy.ticker
+        if not symbol:
+            logger.warning(f"Impossible de déterminer le symbole pour une stratégie, ignorée")
+            return
+        if position_count >= args.max_positions:
+            return
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        try:
+            async with semaphore:
+                market_data = await market_data_service.get_historical_data(
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    timeframe="1d"
+                )
+            # Check for entry conditions
+            if await strategy.should_enter(market_data):
+                logger.info(f"Entry signal detected for {symbol} using {strategy.__class__.__name__}")
+                entry_result = await strategy.execute_entry()
+                if entry_result.get('success', False):
+                    logger.info(f"Entry executed: {entry_result}")
+                    position_count += 1
+                else:
+                    logger.warning(f"Entry failed: {entry_result.get('error', 'Unknown error')}")
+            # Check for exit conditions on existing positions
+            if hasattr(strategy, 'open_positions') and strategy.open_positions:
+                if await strategy.should_exit("dummy_position_id", market_data):
+                    logger.info(f"Exit signal detected for {symbol}")
+                    exit_result = await strategy.execute_exit("dummy_position_id")
+                    if exit_result.get('success', False):
+                        logger.info(f"Exit executed: {exit_result}")
+                        position_count -= 1
+                    else:
+                        logger.warning(f"Exit failed: {exit_result.get('error', 'Unknown error')}")
+        except Exception as e:
+            logger.error(f"Error processing {symbol}: {str(e)}")
     try:
         while datetime.now() < end_time and position_count < args.max_positions:
-            for strategy in strategies:
-                # Accès sécurisé au symbole sous-jacent
-                symbol = getattr(strategy, 'underlying_symbol', None)
-                if symbol is None and hasattr(strategy, 'symbol'):
-                    symbol = strategy.symbol
-                elif symbol is None and hasattr(strategy, 'ticker'):
-                    symbol = strategy.ticker
-                    
-                if not symbol:
-                    logger.warning(f"Impossible de déterminer le symbole pour une stratégie, ignorée")
-                    continue
-                
-                # Skip if we've reached max positions
-                if position_count >= args.max_positions:
-                    break
-                
-                # Get market data
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=30)  # 30 days of historical data
-                
-                try:
-                    market_data = await market_data_service.get_historical_data(
-                        symbol=symbol,
-                        start_date=start_date,
-                        end_date=end_date,
-                        timeframe="1d"
-                    )
-                    
-                    # Check for entry conditions
-                    if await strategy.should_enter(market_data):
-                        logger.info(f"Entry signal detected for {symbol} using {strategy.__class__.__name__}")
-                        
-                        # Execute entry
-                        entry_result = await strategy.execute_entry()
-                        
-                        if entry_result.get('success', False):
-                            logger.info(f"Entry executed: {entry_result}")
-                            position_count += 1
-                        else:
-                            logger.warning(f"Entry failed: {entry_result.get('error', 'Unknown error')}")
-                    
-                    # Check for exit conditions on existing positions
-                    # Note: In a real implementation, we'd track positions and their IDs
-                    if hasattr(strategy, 'open_positions') and strategy.open_positions:
-                        # For strategies that track positions internally like ButterflySpreadStrategy
-                        if await strategy.should_exit("dummy_position_id", market_data):
-                            logger.info(f"Exit signal detected for {symbol}")
-                            
-                            # Execute exit
-                            exit_result = await strategy.execute_exit("dummy_position_id")
-                            
-                            if exit_result.get('success', False):
-                                logger.info(f"Exit executed: {exit_result}")
-                                position_count -= 1
-                            else:
-                                logger.warning(f"Exit failed: {exit_result.get('error', 'Unknown error')}")
-                
-                except Exception as e:
-                    logger.error(f"Error processing {symbol}: {str(e)}")
-            
-            # Sleep before next iteration
+            tasks = [handle_strategy(strategy) for strategy in strategies]
+            await asyncio.gather(*tasks)
             await asyncio.sleep(60)  # Check every minute
-    
     except KeyboardInterrupt:
         logger.info("Trading interrupted by user")
-    
     finally:
-        # Close all positions at the end
         logger.info("Closing any remaining positions...")
         await broker.close_all_positions()
-        
-        # Print trading summary
-        # In a real implementation, we'd track trades and calculate performance metrics
         logger.info("Trading completed")
+
 
 
 if __name__ == '__main__':
