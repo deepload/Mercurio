@@ -457,6 +457,11 @@ class AlpacaCryptoTrader:
             # Arrondir à 6 décimales pour éviter les erreurs de précision
             order_qty = round(order_qty, 6)
             
+            MIN_ORDER_VALUE = 1  # Broker minimum notional (e.g. $1)
+            if order_value < MIN_ORDER_VALUE:
+                logger.warning(f"Ordre non exécuté pour {symbol}: valeur {order_value:.2f} < minimum autorisé {MIN_ORDER_VALUE}")
+                return
+
             if order_qty > 0:
                 logger.info(f"Achat de {order_qty:.6f} {symbol} @ ${price:.4f} (valeur: ${order_value:.2f})")
                 

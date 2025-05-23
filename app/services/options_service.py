@@ -156,24 +156,24 @@ class OptionsService:
             except AttributeError:
                 # If the above implementation doesn't work, we'll try alternative methods
                 logger.warning("Standard options API not found, trying alternative implementation")
-                
-                # Direct REST API call implementation:
-                # This would need to be adjusted based on actual API documentation
-                options_url = f"https://data.alpaca.markets/v1/options/{symbol}/expirations/{expiry}"
-                # Use requests or aiohttp to call the API directly
-                
-                logger.warning("Options API not fully implemented - check Alpaca API documentation")
-                
+
+                # Defensive: Ensure 'expiration_date' and 'expirations' are set
+                expirations_fallback = []
+                if 'expirations' in locals() and expirations:
+                    expirations_fallback = expirations
+                elif expiration_date:
+                    expirations_fallback = [expiration_date]
+                else:
+                    logger.error(f"No expiration dates available for {symbol} in fallback options chain logic.")
+                    return []
+
                 # Return mock data for now to allow for development
                 options_list = []
-                
                 # Get current price
                 current_price = await self.market_data.get_latest_price(symbol)
-                
                 # Generate options at various strike prices around current price
                 strike_range = [0.7, 0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2, 1.3]
-                
-                for expiry in expirations:
+                for expiry in expirations_fallback:
                     for strike_mult in strike_range:
                         strike_price = round(current_price * strike_mult, 2)
                         

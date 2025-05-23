@@ -669,27 +669,48 @@ class LongCallStrategy(BaseOptionsStrategy):
         Returns:
             bool: True if conditions are met, False otherwise
         """
+        import inspect
         try:
-            # Check account balance - no await since get_account() is not async
+            # Fix for broker attribute missing - use broker_adapter if available
+            if not hasattr(self, 'broker'):
+                if hasattr(self, 'broker_adapter'):
+                    self.broker = self.broker_adapter
+                    logger.info("Fixed broker attribute using broker_adapter")
+                elif hasattr(self, 'trading_service') and hasattr(self.trading_service, 'broker'):
+                    self.broker = self.trading_service.broker
+                    logger.info("Fixed broker attribute using trading_service.broker")
+                else:
+                    logger.warning("No broker available for strategy")
+                    return False
+
+            # Support both sync and async get_account
             account = self.broker.get_account()
+            if inspect.isawaitable(account):
+                account = await account
             if not account:
                 logger.warning("Unable to retrieve account information")
                 return False
-                
-            # Access account properties directly without using get()
-            buying_power = float(account.buying_power) if hasattr(account, 'buying_power') else 0
-            
+
+            # Support both Account object and dict
+            buying_power = getattr(account, "buying_power", None)
+            if buying_power is None and isinstance(account, dict):
+                buying_power = account.get("buying_power")
+            if buying_power is None:
+                logger.warning("Unable to retrieve buying_power from account")
+                return False
+
+            buying_power = float(buying_power)
+
             if buying_power < 2000:  # Minimum required for Long Call
                 logger.warning(f"Insufficient buying power for Long Call strategy: {buying_power}")
                 return False
-                
+
             # Check if options trading is enabled
             if hasattr(self.broker, 'enable_options') and not self.broker.enable_options:
                 logger.warning("Options trading is not enabled")
                 return False
-                
+
             return True
-            
         except Exception as e:
             logger.error(f"Error checking account requirements: {str(e)}")
             return False
