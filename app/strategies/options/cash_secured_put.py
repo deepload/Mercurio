@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
+import inspect
 
 from app.core.models.option import OptionContract, OptionPosition, OptionType
 from app.strategies.options.base_options_strategy import BaseOptionsStrategy
@@ -58,7 +59,7 @@ class CashSecuredPutStrategy(BaseOptionsStrategy):
             roll_when_dte: Number of days remaining before expiration to roll the position
             use_technical_filters: Use technical filters for entry
         """
-        super().__init__(underlying_symbol, account_size, max_position_size, **kwargs)
+        super().__init__(name="Cash Secured Put", description="Vente de puts couverts par du cash")
         
         self.min_implied_volatility = min_implied_volatility
         self.max_days_to_expiry = max_days_to_expiry
@@ -294,7 +295,10 @@ class CashSecuredPutStrategy(BaseOptionsStrategy):
             option_data = await self._get_current_option_data()
             
             if not option_data:
-                return {"success": False, "error": f"Impossible d'obtenir les données pour {self.current_put.symbol}"}
+                return {
+                    "has_position": True,
+                    "error": f"Impossible d'obtenir les données pour {self.current_put.symbol}"
+                }
                 
             # Acheter des puts pour fermer la position (un put vendu est racheté)
             ask_price = option_data.get("ask", 0)
@@ -627,14 +631,37 @@ class CashSecuredPutStrategy(BaseOptionsStrategy):
             bool: True if conditions are met, False otherwise
         """
         try:
-            # Vérifier le solde du compte
-            account_info = await self.broker.get_account()
-            if not account_info or not account_info.get("buying_power"):
+            # Fix for broker attribute missing - use broker_adapter if available
+            if not hasattr(self, 'broker'):
+                if hasattr(self, 'broker_adapter'):
+                    self.broker = self.broker_adapter
+                    logger.info(f"Fixed broker attribute using broker_adapter")
+                elif hasattr(self, 'trading_service') and hasattr(self.trading_service, 'broker'):
+                    self.broker = self.trading_service.broker
+                    logger.info(f"Fixed broker attribute using trading_service.broker")
+                else:
+                    logger.warning("No broker available for strategy")
+                    return False
+            
+            # Support both sync and async get_account
+            import inspect
+            account_info = self.broker.get_account()
+            if inspect.isawaitable(account_info):
+                account_info = await account_info
+            if not account_info:
                 logger.warning("Impossible de récupérer les informations du compte")
                 return False
-                
-            buying_power = float(account_info.get("buying_power", 0))
-            
+
+            # Support both Account object and dict
+            buying_power = getattr(account_info, "buying_power", None)
+            if buying_power is None and isinstance(account_info, dict):
+                buying_power = account_info.get("buying_power")
+            if buying_power is None:
+                logger.warning("Impossible de récupérer buying_power depuis le compte")
+                return False
+
+            buying_power = float(buying_power)
+
             if buying_power < 5000:  # Minimum requis pour CSP
                 logger.warning(f"Pouvoir d'achat insuffisant pour la stratégie CSP: {buying_power}")
                 return False
