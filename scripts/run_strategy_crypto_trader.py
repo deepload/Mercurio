@@ -836,6 +836,13 @@ def main():
         # Créer le trader avec la durée de session spécifiée
         trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
         
+        # Clarifier l'architecture hybride (données vs trading)
+        if args.data_provider != "alpaca":
+            print(f"\n[ARCHITECTURE HYBRIDE]")
+            print(f"- {args.data_provider.capitalize()} sera utilisé comme source de données de marché (prix, historiques)")
+            print(f"- Alpaca sera utilisé uniquement pour l'exécution des trades et la gestion du compte")
+            print(f"- Les messages 'API Alpaca' concernent le trading, pas les données de marché\n")
+        
         # Configurer les paramètres
         trader.position_size_pct = args.position_size
         trader.stop_loss_pct = args.stop_loss
@@ -945,6 +952,13 @@ def main():
         
         # Créer le trader avec la durée de session spécifiée
         trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
+        
+        # Clarifier l'architecture hybride (données vs trading)
+        if args.data_provider != "alpaca":
+            print(f"\n[ARCHITECTURE HYBRIDE]")
+            print(f"- {args.data_provider.capitalize()} sera utilisé comme source de données de marché (prix, historiques)")
+            print(f"- Alpaca sera utilisé uniquement pour l'exécution des trades et la gestion du compte")
+            print(f"- Les messages 'API Alpaca' concernent le trading, pas les données de marché\n")
         
         # Configurer le niveau d'API
         if api_level > 0:
@@ -1246,18 +1260,15 @@ def main():
         print(f"Stratégie {strategy_instance.name} initialisée avec succès")
         print("Utilisation du trader Alpaca de base avec adaptation des signaux")
         
-        # Créer le trader avec la durée de session spécifiée
-        trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
-        
-        # Configurer le niveau d'API
-        if api_level > 0:
-            print(f"Configuration du niveau d'API Alpaca: {api_level}")
-            trader.subscription_level = api_level
-        
-        # Configurer les paramètres
-        trader.position_size_pct = args.position_size
-        trader.stop_loss_pct = args.stop_loss
-        trader.take_profit_pct = args.take_profit
+        # Initialiser le trader avec les paramètres spécifiés
+        trader = initialize_trader(
+            session_duration=session_duration,
+            data_provider=args.data_provider,
+            api_level=api_level,
+            position_size=args.position_size,
+            stop_loss=args.stop_loss,
+            take_profit=args.take_profit
+        )
         
         # La stratégie personnalisée sera utilisée dans un script séparé
         # qui sera exécuté ultérieurement avec les mêmes paramètres
@@ -1313,8 +1324,46 @@ def cleanup_resources():
             trader_instance.stop()
         except Exception as e:
             logger.error(f"Erreur lors de l'arrêt du trader: {e}")
-    
+
     logger.info("Rapport généré et ressources nettoyées")
+
+
+def initialize_trader(session_duration, data_provider, api_level=0, position_size=0.02, stop_loss=0.03, take_profit=0.06):
+    """Initialise le trader avec les paramètres spécifiés et affiche les messages appropriés
+
+    Args:
+        session_duration: Durée de la session de trading
+        data_provider: Fournisseur de données à utiliser (alpaca, binance, yahoo, etc.)
+        api_level: Niveau d'API Alpaca (0=Basic, 1=Pro, etc.)
+        position_size: Taille de position en % du portefeuille
+        stop_loss: Stop loss en % sous le prix d'entrée
+        take_profit: Take profit en % au-dessus du prix d'entrée
+
+    Returns:
+        Instance du trader initialisé
+    """
+    # Créer le trader avec la durée de session spécifiée
+    trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=data_provider)
+
+    # Clarifier l'architecture hybride (données vs trading)
+    if data_provider != "alpaca":
+        print(f"\n[ARCHITECTURE HYBRIDE]")
+        print(f"- {data_provider.capitalize()} sera utilisé comme source de données de marché (prix, historiques)")
+        print(f"- Alpaca sera utilisé uniquement pour l'exécution des trades et la gestion du compte")
+        print(f"- Les messages 'API Alpaca' concernent le trading, pas les données de marché\n")
+
+    # Configurer le niveau d'API
+    if api_level > 0:
+        print(f"Configuration du niveau d'API Alpaca: {api_level}")
+        trader.subscription_level = api_level
+
+    # Configurer les paramètres de trading
+    trader.position_size_pct = position_size
+    trader.stop_loss_pct = stop_loss
+    trader.take_profit_pct = take_profit
+
+    return trader
+
 
 def run_crypto_trader():
     """Fonction principale pour exécuter le trader de crypto"""
@@ -1325,6 +1374,7 @@ def run_crypto_trader():
         # Enregistrement du gestionnaire de signal pour un arrêt propre (solution de secours)
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
+
     
     try:
         success = main()

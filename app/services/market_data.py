@@ -549,7 +549,7 @@ class MarketDataService:
             DataFrame avec les données crypto ou DataFrame vide en cas d'échec
         """
         # Utilisation de la méthode qui fonctionne dans le HFT Trader
-        logger.info(f"Making direct API call to Alpaca crypto endpoint for {symbol}")
+        logger.info(f"[DONNÉES DE MARCHÉ - Legacy] Récupération des données historiques pour {symbol} via l'API Alpaca")
         
         # Construction de l'URL exactement comme dans le HFT Trader
         endpoint = "https://data.alpaca.markets/v1beta3/crypto/us/bars"

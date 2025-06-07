@@ -447,14 +447,15 @@ class AlpacaCryptoTrader:
             # Initialiser le service de données de marché
             # Utiliser le service standard avec le fournisseur approprié
             self.market_data_service = MarketDataService(provider_name=self.data_provider)
-            logger.info(f"Service de données de marché initialisé avec fournisseur {self.data_provider}")
+            logger.info(f"[DONNÉES DE MARCHÉ] Service initialisé avec fournisseur {self.data_provider}")
             
             # Vérifier si le fournisseur a été correctement initialisé
             active_provider = self.market_data_service.active_provider
             if active_provider:
-                logger.info(f"Fournisseur actif: {active_provider.name}")
+                logger.info(f"[DONNÉES DE MARCHÉ] Fournisseur actif: {active_provider.name} (sera utilisé pour les prix et données historiques)")
+                logger.info(f"[TRADING] Alpaca sera utilisé uniquement pour l'exécution des trades et la gestion du compte")
             else:
-                logger.warning(f"Le fournisseur {self.data_provider} n'a pas pu être initialisé, utilisation du fournisseur par défaut")
+                logger.warning(f"[DONNÉES DE MARCHÉ] Le fournisseur {self.data_provider} n'a pas pu être initialisé, utilisation du fournisseur par défaut")
                 # Le MarketDataService utilisera automatiquement le fournisseur par défaut
             
             # Réinitialiser le dictionnaire des prix les plus élevés
