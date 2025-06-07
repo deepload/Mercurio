@@ -242,7 +242,7 @@ class AlpacaProvider(MarketDataProvider):
             }
             
             # Execute request
-            logger.info(f"AlpacaProvider: Making direct API call to Alpaca crypto endpoint for {symbol} at {base_url}")
+            logger.info(f"[DONNÉES DE MARCHÉ - AlpacaProvider] Récupération des données historiques pour {symbol} via l'API Alpaca")
             response = requests.get(base_url, params=params, headers=headers)
             
             # Check response status
