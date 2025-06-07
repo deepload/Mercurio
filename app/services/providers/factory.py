@@ -60,6 +60,14 @@ class MarketDataProviderFactory:
             self.register_provider("yahoo", YahooFinanceProvider, priority=20)
         except ImportError:
             logger.info("Yahoo Finance provider not available (missing dependencies)")
+            
+        # Try to register Binance provider (good priority for crypto)
+        try:
+            from app.services.providers.binance import BinanceProvider
+            self.register_provider("binance", BinanceProvider, priority=15)  # Entre Polygon et Yahoo
+            logger.info("Binance provider registered for cryptocurrency data")
+        except ImportError:
+            logger.info("Binance provider not available (missing dependencies)")
     
     def register_provider(self, name: str, provider_class: Type[MarketDataProvider], priority: int = 50):
         """
@@ -136,12 +144,11 @@ class MarketDataProviderFactory:
         """
         Get the default provider based on availability and priority.
         If a symbol is provided and it is a crypto symbol (contains '-' or '/'),
-        skip Alpaca as a provider unless explicitly requested, to avoid 404 errors
-        for users without crypto access. Polygon and Yahoo will be prioritized for crypto,
-        then fallback to SampleDataProvider.
+        prefer Binance as the provider for crypto data and skip Alpaca to avoid 404 errors
+        for users without crypto access. Falls back to other providers if Binance is unavailable.
 
         Args:
-            symbol: Optional. The symbol to fetch data for. If it's a crypto symbol, Alpaca is skipped.
+            symbol: Optional. The symbol to fetch data for. If it's a crypto symbol, Binance is preferred.
 
         Returns:
             Default provider instance
@@ -156,6 +163,13 @@ class MarketDataProviderFactory:
             if ('-' in symbol or '/' in symbol):
                 is_crypto = True
 
+        # For crypto symbols, try Binance first
+        if is_crypto and "binance" in self._provider_classes:
+            binance_provider = self.get_provider("binance")
+            if binance_provider:
+                logger.info(f"Using 'binance' as preferred provider for crypto symbol {symbol}")
+                return binance_provider
+
         # Get all provider names sorted by priority
         provider_names = sorted(
             self._provider_priorities.keys(),
@@ -165,7 +179,7 @@ class MarketDataProviderFactory:
         # If crypto, skip Alpaca unless explicitly requested
         for name in provider_names:
             if is_crypto and name == "alpaca":
-                logger.info("Skipping Alpaca as provider for crypto symbol {} due to known 404 issues for most users".format(symbol))
+                logger.info(f"Skipping Alpaca as provider for crypto symbol {symbol} due to known 404 issues for most users")
                 continue
             provider = self.get_provider(name)
             if provider:

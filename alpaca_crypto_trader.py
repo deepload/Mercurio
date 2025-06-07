@@ -29,8 +29,11 @@ from dotenv import load_dotenv
 # Import du service de données de marché
 # Import standard de MarketDataService
 from app.services.market_data import MarketDataService
+import requests
 
-# Classe YahooMarketDataService pour la récupération des données via Yahoo Finance
+# Import des fournisseurs officiels
+from app.services.providers.yahoo import YahooFinanceProvider
+from app.services.providers.binance import BinanceProvider
 class YahooMarketDataService(MarketDataService):
     """Service de données de marché spécifique pour Yahoo Finance"""
     
@@ -112,6 +115,217 @@ class YahooMarketDataService(MarketDataService):
             logger.error(f"Erreur lors de la récupération du prix actuel pour {symbol} ({yahoo_symbol}): {e}")
             return None
 
+
+class BinanceMarketDataService(MarketDataService):
+    """Service de données de marché spécifique pour Binance"""
+    
+    def __init__(self):
+        super().__init__(provider_name="binance")
+        self.provider_name = "binance"
+        self.base_url = "https://api.binance.com"
+    
+    def _convert_symbol_to_binance_format(self, symbol):
+        """Convertit un symbole du format Alpaca (BTC/USD) au format Binance (BTCUSDT)"""
+        if '/' not in symbol and '-' not in symbol:
+            # Déjà au bon format
+            return symbol
+            
+        # Séparer la base et la quote
+        if '/' in symbol:
+            base, quote = symbol.split('/')
+        elif '-' in symbol:
+            base, quote = symbol.split('-')
+        else:
+            return symbol
+            
+        # Règles de conversion spécifiques
+        if quote == 'USD':
+            return f"{base}USDT"
+        elif quote == 'USDC':
+            return f"{base}USDC"
+        elif quote == 'USDT':
+            return f"{base}USDT"
+        elif quote == 'BTC':
+            return f"{base}BTC"
+        else:
+            # Cas général
+            return f"{base}{quote}"
+        
+    async def get_historical_data(self, symbol, start_date, end_date, timeframe="1d"):
+        """Récupérer les données historiques via l'API REST Binance"""
+        import aiohttp
+        import pandas as pd
+        import asyncio
+        import time
+        
+        try:
+            # Convertir le symbole au format Binance
+            binance_symbol = self._convert_symbol_to_binance_format(symbol)
+            
+            # Convertir les dates en timestamps (millisecondes)
+            if isinstance(start_date, datetime):
+                start_ts = int(start_date.timestamp() * 1000)
+            else:
+                start_ts = int(pd.Timestamp(start_date).timestamp() * 1000)
+                
+            if isinstance(end_date, datetime):
+                end_ts = int(end_date.timestamp() * 1000)
+            else:
+                end_ts = int(pd.Timestamp(end_date).timestamp() * 1000)
+            
+            # Convertir l'intervalle au format Binance
+            interval_map = {
+                "1m": "1m",
+                "5Min": "5m",
+                "15m": "15m",
+                "30m": "30m",
+                "1h": "1h",
+                "4h": "4h",
+                "1d": "1d",
+                "1w": "1w"
+            }
+            binance_interval = interval_map.get(timeframe, "1h")
+            
+            # Construire l'URL pour l'API Binance
+            endpoint = f"/api/v3/klines"
+            url = f"{self.base_url}{endpoint}"
+            
+            params = {
+                "symbol": binance_symbol,
+                "interval": binance_interval,
+                "startTime": start_ts,
+                "endTime": end_ts,
+                "limit": 1000  # Maximum autorisé par Binance
+            }
+            
+            logger.info(f"Récupération des données Binance pour {symbol} ({binance_symbol}) de {start_date} à {end_date} avec intervalle {binance_interval}")
+            
+            # Utiliser une nouvelle boucle d'événements pour éviter les conflits
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Exécuter la requête dans la nouvelle boucle
+                response_data = loop.run_until_complete(self._fetch_historical_data(url, params))
+                
+                if not response_data:
+                    return pd.DataFrame()
+                    
+                # Convertir les données en DataFrame
+                df = pd.DataFrame(response_data, columns=[
+                    'open_time', 'open', 'high', 'low', 'close', 'volume',
+                    'close_time', 'quote_asset_volume', 'number_of_trades',
+                    'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+                ])
+                
+                # Convertir les types
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = pd.to_numeric(df[col])
+                
+                # Convertir les timestamps en dates
+                df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
+                df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+                
+                # Utiliser open_time comme index
+                df.set_index('open_time', inplace=True)
+                
+                return df
+            finally:
+                # Fermer proprement la boucle
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    loop.close()
+                except:
+                    pass
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des données Binance pour {symbol}: {e}")
+            return pd.DataFrame()
+            
+    async def _fetch_historical_data(self, url, params):
+        """Méthode auxiliaire pour récupérer les données historiques"""
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if not data:
+                            logger.warning(f"Pas de données disponibles pour {params['symbol']} sur Binance")
+                            return None
+                        
+                        return data
+                    else:
+                        error_msg = await response.text()
+                        logger.error(f"Erreur API Binance ({response.status}): {error_msg}")
+                        return None
+        except Exception as e:
+            logger.error(f"Erreur lors de la requête Binance: {e}")
+            return None
+        
+    async def get_latest_price(self, symbol, provider_name=None):
+        """Récupérer le dernier prix via l'API REST Binance"""
+        import aiohttp
+        import asyncio
+        
+        try:
+            # Convertir le symbole au format Binance
+            binance_symbol = self._convert_symbol_to_binance_format(symbol)
+            
+            # Construire l'URL pour l'API Binance
+            endpoint = f"/api/v3/ticker/price"
+            url = f"{self.base_url}{endpoint}"
+            
+            params = {"symbol": binance_symbol}
+            
+            logger.info(f"Récupération du prix actuel pour {symbol} ({binance_symbol}) via Binance")
+            
+            # Utiliser une nouvelle boucle d'événements pour éviter les conflits
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Exécuter la requête dans la nouvelle boucle
+                price_data = loop.run_until_complete(self._fetch_latest_price(url, params, symbol, binance_symbol))
+                return price_data
+            finally:
+                # Fermer proprement la boucle
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    loop.close()
+                except:
+                    pass
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération du prix actuel pour {symbol} via Binance: {e}")
+            return None
+            
+    async def _fetch_latest_price(self, url, params, symbol, binance_symbol):
+        """Méthode auxiliaire pour récupérer le prix actuel"""
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'price' in data:
+                            price = float(data['price'])
+                            logger.info(f"Prix actuel pour {symbol}: ${price:.4f}")
+                            return price
+                        else:
+                            logger.warning(f"Format de réponse inattendu de Binance pour {binance_symbol}")
+                            return None
+                    else:
+                        error_msg = await response.text()
+                        logger.error(f"Erreur API Binance ({response.status}): {error_msg}")
+                        return None
+        except Exception as e:
+            logger.error(f"Erreur lors de la requête de prix Binance: {e}")
+            return None
+
 # Chargement des variables d'environnement
 load_dotenv()
 
@@ -180,38 +394,44 @@ class AlpacaCryptoTrader:
         
         # Client API Alpaca
         self.api = None
-        
+
         # Paramètres de trading
         self.symbols = []  # Sera rempli avec les symboles crypto disponibles
         self.custom_symbols = []  # Liste personnalisée de symboles à utiliser
         self.use_custom_symbols = False  # Si True, utilise custom_symbols au lieu de la liste filtrée
-        self.fast_ma_period = 5   # 5 minutes pour la moyenne mobile rapide
-        self.slow_ma_period = 15  # 15 minutes pour la moyenne mobile lente
-        self.position_size_pct = 0.02  # 2% du portefeuille par position
-        self.stop_loss_pct = 0.03  # 3% de stop loss
-        self.take_profit_pct = 0.06  # 6% de prise de profit
-        
-        # Paramètres pour le trailing stop-loss
-        self.use_trailing_stop = True  # Activer le trailing stop-loss par défaut
-        self.trailing_stop_pct = 0.02  # 2% de trailing stop-loss (distance en pourcentage)
+        self.fast_ma_period = 9       # Période de la moyenne mobile rapide
+        self.slow_ma_period = 21      # Période de la moyenne mobile lente
+        self.lookback_days = 30       # Nombre de jours d'historique à analyser
+        self.timeframe = "1h"         # Timeframe pour l'analyse
+        self.position_size_pct = 0.02  # Taille de position en % du portefeuille
+        self.stop_loss_pct = 0.03     # Stop loss à 3% en dessous du prix d'entrée
+        self.take_profit_pct = 0.06   # Take profit à 6% au-dessus du prix d'entrée
+        self.use_trailing_stop = True # Utiliser un trailing stop
+        self.trailing_stop_pct = 0.02 # Trailing stop à 2% en dessous du plus haut
         self.trailing_stop_activation_pct = 0.015  # Activer le trailing stop après 1.5% de gain
-        
-        # Suivi de l'état
-        self.positions = {}
-        self.highest_prices = {}  # Pour suivre le prix le plus élevé atteint par chaque position
-        self.portfolio_value = 0.0
-        self.initial_portfolio_value = 0.0
+
+        # Paramètres de session
         self.session_start_time = None
         self.session_end_time = None
-        self.trade_history = []  # Pour enregistrer l'historique des transactions
-        self.running = True  # Variable pour contrôler l'exécution
-        
-        # Service de données de marché
+
+        # État du système
+        self.initialized = False
+        self.running = False
+        self.positions = {}
+        self.portfolio_value = 0.0
+        self.cash = 0.0
+        self.trade_history = []
+
+        # Fournisseur de données
         self.data_provider = data_provider
-        self.market_data_service = None  # Sera initialisé dans initialize()
-        
+        logger.info(f"Utilisation du fournisseur de données: {data_provider}")
+
+        # Symboles personnalisés
+        self.use_custom_symbols = False
+        self.custom_symbols = []
+
         logger.info(f"AlpacaCryptoTrader initialisé avec fournisseur de données {data_provider}")
-        
+
     def initialize(self):
         """Initialiser les services et charger la configuration"""
         try:
@@ -225,14 +445,17 @@ class AlpacaCryptoTrader:
             logger.info("API Alpaca initialisée avec succès")
             
             # Initialiser le service de données de marché
-            if self.data_provider == "yahoo":
-                # Utiliser notre service spécialisé pour Yahoo Finance
-                self.market_data_service = YahooMarketDataService()
-                logger.info("Service de données Yahoo Finance initialisé")
+            # Utiliser le service standard avec le fournisseur approprié
+            self.market_data_service = MarketDataService(provider_name=self.data_provider)
+            logger.info(f"Service de données de marché initialisé avec fournisseur {self.data_provider}")
+            
+            # Vérifier si le fournisseur a été correctement initialisé
+            active_provider = self.market_data_service.active_provider
+            if active_provider:
+                logger.info(f"Fournisseur actif: {active_provider.name}")
             else:
-                # Utiliser le service standard pour les autres fournisseurs
-                self.market_data_service = MarketDataService(provider_name=self.data_provider)
-                logger.info(f"Service de données de marché initialisé avec fournisseur {self.data_provider}")
+                logger.warning(f"Le fournisseur {self.data_provider} n'a pas pu être initialisé, utilisation du fournisseur par défaut")
+                # Le MarketDataService utilisera automatiquement le fournisseur par défaut
             
             # Réinitialiser le dictionnaire des prix les plus élevés
             self.highest_prices = {}
@@ -440,9 +663,9 @@ class AlpacaCryptoTrader:
             end_str = end.strftime('%Y-%m-%d')
             
             # Utiliser le service de données de marché avec le fournisseur spécifié
-            if self.data_provider == "yahoo":
-                # Utiliser le service de données de marché avec Yahoo Finance
-                logger.info(f"Récupération des données historiques pour {symbol} via Yahoo Finance")
+            if self.data_provider in ["yahoo", "binance"]:
+                # Utiliser le service de données de marché avec Yahoo Finance ou Binance
+                logger.info(f"Récupération des données historiques pour {symbol} via {self.data_provider.capitalize()}")
                 # Créer un event loop pour les appels asynchrones
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -460,7 +683,7 @@ class AlpacaCryptoTrader:
                 
                 # Vérifier si nous avons des données
                 if bars is None or bars.empty:
-                    logger.warning(f"Pas de données historiques disponibles pour {symbol} via Yahoo Finance")
+                    logger.warning(f"Pas de données historiques disponibles pour {symbol} via {self.data_provider.capitalize()}")
                     return
             else:
                 # Utiliser l'API Alpaca directement
@@ -479,7 +702,7 @@ class AlpacaCryptoTrader:
                 # Si les données sont multi-index (symbole, timestamp), prendre juste le symbole concerné
                 if isinstance(bars.index, pd.MultiIndex):
                     bars = bars.loc[symbol]
-                
+            
             # Calculer les moyennes mobiles
             bars['fast_ma'] = bars['close'].rolling(window=self.fast_ma_period).mean()
             bars['slow_ma'] = bars['close'].rolling(window=self.slow_ma_period).mean()
@@ -498,8 +721,8 @@ class AlpacaCryptoTrader:
             
             # Obtenir le prix actuel en utilisant le fournisseur de données spécifié
             try:
-                if self.data_provider == "yahoo":
-                    # Utiliser Yahoo Finance via YahooMarketDataService
+                if self.data_provider in ["yahoo", "binance"]:
+                    # Utiliser Yahoo Finance ou Binance via le service approprié
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     current_price = loop.run_until_complete(
@@ -508,7 +731,7 @@ class AlpacaCryptoTrader:
                     loop.close()
                     
                     if current_price is not None:
-                        logger.info(f"{symbol} prix actuel (Yahoo Finance): ${current_price:.4f}")
+                        logger.info(f"{symbol} prix actuel ({self.data_provider.capitalize()}): ${current_price:.4f}")
                     else:
                         # Fallback à la dernière barre si disponible
                         if not bars.empty:

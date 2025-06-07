@@ -34,6 +34,10 @@ from app.strategies.lstm_predictor import LSTMPredictorStrategy
 from app.strategies.llm_strategy import LLMStrategy
 from app.strategies.llm_strategy_v2 import LLMStrategyV2
 
+# Importer les fournisseurs de données
+from app.services.providers.binance import BinanceProvider
+from app.services.providers.factory import MarketDataProviderFactory
+
 # Fonction pour détecter le niveau d'accès Alpaca
 def detect_alpaca_level(api_key=None, api_secret=None, base_url=None, data_url=None):
     """
@@ -693,6 +697,8 @@ def main():
                        help="Poids du sentiment dans la stratégie LLM_V2 (default: 0.7)")
     parser.add_argument("--min-confidence", type=float, default=0.6,
                        help="Confiance minimale pour les signaux de la stratégie LLM_V2 (default: 0.6)")
+    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo", "binance"], default="alpaca",
+                       help="Fournisseur de données à utiliser (default: alpaca)")
     
     args = parser.parse_args()
     
@@ -738,6 +744,7 @@ def main():
     print(f"Stop-loss: {args.stop_loss * 100}%")
     print(f"Take-profit: {args.take_profit * 100}%")
     print(f"Niveau d'API Alpaca: {api_level if api_level > 0 else 'Non détecté - utilisation du niveau 1'}")
+    print(f"Fournisseur de données: {args.data_provider}")
     
     if args.strategy == StrategyType.MOVING_AVERAGE:
         print(f"MA rapide: {args.fast_ma} minutes")
@@ -1020,10 +1027,18 @@ def main():
                       help="Réentraîner le modèle avant utilisation")
     
     # Option pour le fournisseur de données de marché
-    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo"], default="alpaca",
-                      help="Fournisseur de données de marché à utiliser (alpaca ou yahoo)")
+    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo", "binance"], default="binance",
+                      help="Fournisseur de données de marché à utiliser (binance recommandé pour crypto)")
+    
     
     args = parser.parse_args()
+    
+    # Afficher un message sur le fournisseur de données
+    print(f"Fournisseur de données sélectionné: {args.data_provider}")
+    if args.data_provider == "binance":
+        print("Binance est le fournisseur recommandé pour les données crypto - accès sans API key requis")
+    elif args.data_provider == "alpaca":
+        print("Note: Alpaca peut renvoyer des erreurs 404 pour certains symboles crypto si vous n'avez pas d'abonnement")
     
     # Chargement des symboles
     global PERSONALIZED_CRYPTO_LIST
