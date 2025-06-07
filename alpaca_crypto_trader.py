@@ -26,6 +26,92 @@ import alpaca_trade_api as tradeapi
 import pandas as pd
 from dotenv import load_dotenv
 
+# Import du service de données de marché
+# Import standard de MarketDataService
+from app.services.market_data import MarketDataService
+
+# Classe YahooMarketDataService pour la récupération des données via Yahoo Finance
+class YahooMarketDataService(MarketDataService):
+    """Service de données de marché spécifique pour Yahoo Finance"""
+    
+    def __init__(self):
+        super().__init__(provider_name="yahoo")
+        self.provider_name = "yahoo"
+    
+    def _convert_symbol_to_yahoo_format(self, symbol):
+        """Convertit un symbole du format Alpaca (BTC/USD) au format Yahoo Finance (BTC-USD)"""
+        return symbol.replace('/', '-')
+        
+    async def get_historical_data(self, symbol, start_date, end_date, timeframe="1d"):
+        """Récupérer les données historiques via Yahoo Finance"""
+        import yfinance as yf
+        import pandas as pd
+        
+        try:
+            # Convertir le symbole au format Yahoo Finance
+            yahoo_symbol = self._convert_symbol_to_yahoo_format(symbol)
+            
+            # Convertir les dates en chaînes si nécessaire
+            if isinstance(start_date, datetime):
+                start_str = start_date.strftime('%Y-%m-%d')
+            else:
+                start_str = start_date
+                
+            if isinstance(end_date, datetime):
+                end_str = end_date.strftime('%Y-%m-%d')
+            else:
+                end_str = end_date
+                
+            # Convertir l'intervalle au format yfinance
+            yf_interval = timeframe
+            if timeframe == "5Min":
+                yf_interval = "5m"
+            elif timeframe == "1d":
+                yf_interval = "1d"
+            
+            # Récupérer les données via yfinance
+            logger.info(f"Récupération des données Yahoo Finance pour {symbol} ({yahoo_symbol}) de {start_str} à {end_str} avec intervalle {yf_interval}")
+            data = yf.download(yahoo_symbol, start=start_str, end=end_str, interval=yf_interval, progress=False)
+            
+            if data.empty:
+                logger.warning(f"Pas de données disponibles pour {yahoo_symbol} sur Yahoo Finance")
+                return pd.DataFrame()
+            
+            # Renommer les colonnes pour correspondre au format attendu
+            data.columns = [col.lower() for col in data.columns]
+            return data
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des données Yahoo Finance pour {symbol} ({yahoo_symbol}): {e}")
+            return pd.DataFrame()
+        
+    async def get_latest_price(self, symbol, provider_name=None):
+        """Récupérer le dernier prix via Yahoo Finance"""
+        import yfinance as yf
+        
+        try:
+            # Convertir le symbole au format Yahoo Finance
+            yahoo_symbol = self._convert_symbol_to_yahoo_format(symbol)
+            
+            logger.info(f"Récupération du prix actuel pour {symbol} ({yahoo_symbol}) via Yahoo Finance")
+            ticker = yf.Ticker(yahoo_symbol)
+            data = ticker.history(period="1d")
+            
+            if not data.empty:
+                close_price = data['Close'].iloc[-1]
+                if isinstance(close_price, pd.Series):
+                    close_price = close_price.iloc[0]  # Corriger le FutureWarning
+                price = float(close_price)
+                logger.info(f"Prix actuel pour {symbol}: ${price:.4f}")
+                return price
+            else:
+                logger.warning(f"Pas de données disponibles pour {yahoo_symbol} sur Yahoo Finance")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération du prix actuel pour {symbol} ({yahoo_symbol}): {e}")
+            return None
+
 # Chargement des variables d'environnement
 load_dotenv()
 
@@ -66,7 +152,7 @@ class AlpacaCryptoTrader:
     - Journalisation complète et rapport de performance
     """
     
-    def __init__(self, session_duration: SessionDuration = SessionDuration.ONE_HOUR):
+    def __init__(self, session_duration: SessionDuration = SessionDuration.ONE_HOUR, data_provider: str = "alpaca"):
         """Initialiser le système de trading crypto"""
         self.session_duration = session_duration
         
@@ -120,7 +206,11 @@ class AlpacaCryptoTrader:
         self.trade_history = []  # Pour enregistrer l'historique des transactions
         self.running = True  # Variable pour contrôler l'exécution
         
-        logger.info("AlpacaCryptoTrader initialisé")
+        # Service de données de marché
+        self.data_provider = data_provider
+        self.market_data_service = None  # Sera initialisé dans initialize()
+        
+        logger.info(f"AlpacaCryptoTrader initialisé avec fournisseur de données {data_provider}")
         
     def initialize(self):
         """Initialiser les services et charger la configuration"""
@@ -133,6 +223,16 @@ class AlpacaCryptoTrader:
                 api_version='v2'
             )
             logger.info("API Alpaca initialisée avec succès")
+            
+            # Initialiser le service de données de marché
+            if self.data_provider == "yahoo":
+                # Utiliser notre service spécialisé pour Yahoo Finance
+                self.market_data_service = YahooMarketDataService()
+                logger.info("Service de données Yahoo Finance initialisé")
+            else:
+                # Utiliser le service standard pour les autres fournisseurs
+                self.market_data_service = MarketDataService(provider_name=self.data_provider)
+                logger.info(f"Service de données de marché initialisé avec fournisseur {self.data_provider}")
             
             # Réinitialiser le dictionnaire des prix les plus élevés
             self.highest_prices = {}
@@ -339,25 +439,55 @@ class AlpacaCryptoTrader:
             start_str = start.strftime('%Y-%m-%d')
             end_str = end.strftime('%Y-%m-%d')
             
-            # Obtenir les barres de prix (corriger l'erreur expected list, str found)
-            bars = self.api.get_crypto_bars(
-                [symbol],  # Passer une liste au lieu d'une chaîne
-                timeframe='5Min',
-                start=start_str,
-                end=end_str
-            ).df
-            
-            if bars.empty:
-                logger.warning(f"Pas de données historiques disponibles pour {symbol}")
-                return
-            
-            # Si les données sont multi-index (symbole, timestamp), prendre juste le symbole concerné
-            if isinstance(bars.index, pd.MultiIndex):
-                bars = bars.loc[symbol]
+            # Utiliser le service de données de marché avec le fournisseur spécifié
+            if self.data_provider == "yahoo":
+                # Utiliser le service de données de marché avec Yahoo Finance
+                logger.info(f"Récupération des données historiques pour {symbol} via Yahoo Finance")
+                # Créer un event loop pour les appels asynchrones
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Appel avec la signature correcte (start_date, end_date, timeframe)
+                bars = loop.run_until_complete(
+                    self.market_data_service.get_historical_data(
+                        symbol, 
+                        start_date=start, 
+                        end_date=end, 
+                        timeframe="5Min"
+                    )
+                )
+                loop.close()
+                
+                # Vérifier si nous avons des données
+                if bars is None or bars.empty:
+                    logger.warning(f"Pas de données historiques disponibles pour {symbol} via Yahoo Finance")
+                    return
+            else:
+                # Utiliser l'API Alpaca directement
+                logger.info(f"Récupération des données historiques pour {symbol} via Alpaca")
+                bars = self.api.get_crypto_bars(
+                    [symbol],  # Passer une liste au lieu d'une chaîne
+                    timeframe='5Min',
+                    start=start_str,
+                    end=end_str
+                ).df
+                
+                if bars.empty:
+                    logger.warning(f"Pas de données historiques disponibles pour {symbol}")
+                    return
+                
+                # Si les données sont multi-index (symbole, timestamp), prendre juste le symbole concerné
+                if isinstance(bars.index, pd.MultiIndex):
+                    bars = bars.loc[symbol]
                 
             # Calculer les moyennes mobiles
             bars['fast_ma'] = bars['close'].rolling(window=self.fast_ma_period).mean()
             bars['slow_ma'] = bars['close'].rolling(window=self.slow_ma_period).mean()
+            
+            # Vérifier si nous avons assez de données pour les moyennes mobiles
+            if len(bars) < self.slow_ma_period:
+                logger.warning(f"Pas assez de données pour {symbol} pour calculer les moyennes mobiles")
+                return
             
             # Obtenir la position actuelle
             position = None
@@ -366,15 +496,43 @@ class AlpacaCryptoTrader:
             except:
                 pass  # Pas de position existante
             
-            # Obtenir le prix actuel (compatible avec abonnement niveau 1)
+            # Obtenir le prix actuel en utilisant le fournisseur de données spécifié
             try:
-                # Pour le niveau 1, on peut utiliser la dernière barre des dernières 5 minutes comme prix actuel
-                if not bars.empty:
-                    current_price = float(bars.iloc[-1]['close'])
-                    logger.info(f"{symbol} prix actuel (dernière barre): ${current_price:.4f}")
+                if self.data_provider == "yahoo":
+                    # Utiliser Yahoo Finance via YahooMarketDataService
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    current_price = loop.run_until_complete(
+                        self.market_data_service.get_latest_price(symbol)
+                    )
+                    loop.close()
+                    
+                    if current_price is not None:
+                        logger.info(f"{symbol} prix actuel (Yahoo Finance): ${current_price:.4f}")
+                    else:
+                        # Fallback à la dernière barre si disponible
+                        if not bars.empty:
+                            close_price = bars.iloc[-1]['close']
+                            # Corriger le FutureWarning
+                            if isinstance(close_price, pd.Series):
+                                close_price = close_price.iloc[0]
+                            current_price = float(close_price)
+                            logger.info(f"{symbol} prix actuel (fallback dernière barre): ${current_price:.4f}")
+                        else:
+                            logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
+                            return
                 else:
-                    logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
-                    return
+                    # Pour Alpaca niveau 1, on peut utiliser la dernière barre des dernières 5 minutes comme prix actuel
+                    if not bars.empty:
+                        close_price = bars.iloc[-1]['close']
+                        # Corriger le FutureWarning
+                        if isinstance(close_price, pd.Series):
+                            close_price = close_price.iloc[0]
+                        current_price = float(close_price)
+                        logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
+                    else:
+                        logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
+                        return
             except Exception as e:
                 logger.error(f"Impossible d'obtenir le prix actuel pour {symbol}: {e}")
                 return
