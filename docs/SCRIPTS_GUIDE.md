@@ -160,19 +160,25 @@ python scripts/run_strategy_crypto_trader.py --fast-ma 10 --slow-ma 30
 python scripts/run_strategy_crypto_trader.py --strategy transformer --duration 8h --use-custom-symbols
 
 # Trading avec Transformer personnalisé pour les cryptomonnaies à forte volatilité (risque modéré)
-python scripts/run_strategy_crypto_trader.py --strategy transformer --sequence-length 120 --d-model 128 --nhead 8 --position-size 0.01 --stop-loss 0.02 --take-profit 0.05 --use-gpu
+python scripts/run_strategy_crypto_trader.py --strategy transformer --sequence-length 120 --d-model 128 --nhead 8 --position-size 0.01 --stop-loss 0.02 --take-profit 0.05 --use-gpu --use-custom-symbols
 
 # Trading avec Transformer personnalisé pour marchés volatils (risque accru)
-python scripts/run_strategy_crypto_trader.py --strategy transformer --duration night --sequence-length 120 --d-model 128 --nhead 8 --num-layers 3 --signal-threshold 0.6 --position-size 0.015 --stop-loss 0.02 --take-profit 0.05 --use-gpu
+python scripts/run_strategy_crypto_trader.py --strategy transformer --duration night --sequence-length 120 --d-model 128 --nhead 8 --num-layers 3 --signal-threshold 0.6 --position-size 0.015 --stop-loss 0.02 --take-profit 0.05 --use-gpu --use-custom-symbols
+
+# Trading en utilisant Yahoo Finance comme source de données de marché
+python scripts/run_strategy_crypto_trader.py --strategy moving_average --data-provider yahoo
+
+# Trading avec LLMStrategyV2 et Yahoo Finance pour les données de marché
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --data-provider yahoo --use-custom-symbols
 
 # Trading avec la stratégie LLM de base pour analyse de sentiment
-python scripts/run_strategy_crypto_trader.py --strategy llm --news-lookback 48 --sentiment-threshold 0.6 --position-size 0.02
+python scripts/run_strategy_crypto_trader.py --strategy llm --news-lookback 48 --sentiment-threshold 0.6 --position-size 0.02 --use-custom-symbols
 
 # Trading avec LLMStrategyV2 en mode démo (pas besoin de clé API)
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --api-key demo_mode --sentiment-weight 0.5
 
 # Trading avec LLMStrategyV2 optimisé pour crypto volatiles
-python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --sentiment-weight 0.7 --min-confidence 0.75 --position-size 0.01 --stop-loss 0.025 --take-profit 0.05
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --sentiment-weight 0.7 --min-confidence 0.75 --position-size 0.01 --stop-loss 0.025 --take-profit 0.05 --use-custom-symbols
 
 # Trading avec LLMStrategyV2 utilisant un modèle local pour les tests
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --use-local-model --local-model-path models/llama-2-7b

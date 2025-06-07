@@ -74,7 +74,7 @@ def detect_alpaca_level(api_key=None, api_secret=None, base_url=None, data_url=N
         )
         
         logger.info("Test du niveau d'abonnement Alpaca...")
-        
+        #return 3
         # Test niveau 3 (premium) - Accès aux données en temps réel
         try:
             # Tester une fonctionnalité spécifique au niveau 3: données en temps réel plus précises
@@ -184,14 +184,44 @@ def load_crypto_symbols_from_env():
 
 # Liste par défaut
 DEFAULT_CRYPTO_LIST = [
-    "AAVE/USD", "AAVE/USDT", "AVAX/USD", "BAT/USD", "BCH/USD", 
-    "BCH/USDT", "BTC/USD", "BTC/USDT", "CRV/USD", "DOGE/USD", 
-    "DOGE/USDT", "DOT/USD", "ETH/USD", "ETH/USDT", "GRT/USD", 
-    "LINK/USD", "LINK/USDT", "LTC/USD", "LTC/USDT", "MKR/USD", 
-    "PEPE/USD", "SHIB/USD", "SOL/USD", "SUSHI/USD", "SUSHI/USDT", 
-    "TRUMP/USD", "UNI/USD", "UNI/USDT", "USDC/USD", "USDT/USD", 
-    "XRP/USD", "XTZ/USD", "YFI/USD", "YFI/USDT"
+    "BCH/USDT",
+    "MKR/USD",
+    "LTC/USD",
+    "BAT/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "BTC/USD",
+    "AVAX/USD", 
+    "BCH/BTC", 
+    "DOT/USDC", 
+    "USDG/USD", 
+    "BCH/USD", 
+    "UNI/BTC",  
+    "YFI/USD", 
+    "GRT/USD",  
+    "LINK/USD",   
+    "SUSHI/USD",  
+    "UNI/USD", 
+    "CRV/USD", 
+    "XRP/USD",  
+    "AAVE/USD",  
+    "TRUMP/USD", 
+    "XTZ/USD", 
+    "DOT/USD",
+    "SHIB/USD",
+    "PEPE/USD",
+    "DOGE/USD",
 ]
+# DEFAULT_CRYPTO_LIST = [
+#     "AAVE/USD", "AAVE/USDT", "AVAX/USD", "BAT/USD", "BCH/USD", 
+#     "BCH/USDT", "BTC/USD", "BTC/USDT", "CRV/USD", "DOGE/USD", 
+#     "DOGE/USDT", "DOT/USD", "ETH/USD", "ETH/USDT", "GRT/USD", 
+#     "LINK/USD", "LINK/USDT", "LTC/USD", "LTC/USDT", "MKR/USD", 
+#     "PEPE/USD", "SHIB/USD", "SOL/USD", "SUSHI/USD", "SUSHI/USDT", 
+#     "TRUMP/USD", "UNI/USD", "UNI/USDT", "USDC/USD", "USDT/USD", 
+#     "XRP/USD", "XTZ/USD", "YFI/USD", "YFI/USDT"
+# ]
+
 
 # Sera initialisé durant l'exécution
 PERSONALIZED_CRYPTO_LIST = []
@@ -754,7 +784,7 @@ def main():
     # Si la stratégie est moving_average, utiliser AlpacaCryptoTrader directement
     if args.strategy == StrategyType.MOVING_AVERAGE:
         # Créer le trader avec la durée de session spécifiée
-        trader = AlpacaCryptoTrader(session_duration=session_duration)
+        trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
         
         # Configurer les paramètres
         trader.position_size_pct = args.position_size
@@ -864,7 +894,7 @@ def main():
         print("Utilisation du trader Alpaca de base avec adaptation des signaux")
         
         # Créer le trader avec la durée de session spécifiée
-        trader = AlpacaCryptoTrader(session_duration=session_duration)
+        trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
         
         # Configurer le niveau d'API
         if api_level > 0:
@@ -988,6 +1018,10 @@ def main():
                       help="Utiliser le GPU pour l'entraînement (si disponible)")
     parser.add_argument("--retrain", action="store_true", 
                       help="Réentraîner le modèle avant utilisation")
+    
+    # Option pour le fournisseur de données de marché
+    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo"], default="alpaca",
+                      help="Fournisseur de données de marché à utiliser (alpaca ou yahoo)")
     
     args = parser.parse_args()
     
@@ -1155,7 +1189,7 @@ def main():
         print("Utilisation du trader Alpaca de base avec adaptation des signaux")
         
         # Créer le trader avec la durée de session spécifiée
-        trader = AlpacaCryptoTrader(session_duration=session_duration)
+        trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
         
         # Configurer le niveau d'API
         if api_level > 0:
