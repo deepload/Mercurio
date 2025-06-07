@@ -34,6 +34,41 @@ from app.strategies.lstm_predictor import LSTMPredictorStrategy
 from app.strategies.llm_strategy import LLMStrategy
 from app.strategies.llm_strategy_v2 import LLMStrategyV2
 
+# Importer les fournisseurs de données
+from app.services.providers.binance import BinanceProvider
+from app.services.providers.factory import MarketDataProviderFactory
+
+# Suppression des messages d'erreur asyncio "Event loop is closed"
+import asyncio
+import warnings
+import sys
+
+# Solution radicale pour supprimer les erreurs "Event loop is closed"
+# en remplaçant le destructeur de _ProactorBasePipeTransport
+if sys.platform == 'win32':
+    try:
+        # Patch pour Windows uniquement
+        import asyncio.proactor_events
+        
+        # Sauvegarde de la méthode originale
+        original_del = asyncio.proactor_events._ProactorBasePipeTransport.__del__
+        
+        # Remplacement par une version silencieuse qui ne génère pas d'erreur
+        def silent_del(self):
+            try:
+                original_del(self)
+            except RuntimeError as e:
+                if str(e) != 'Event loop is closed':
+                    raise
+        
+        # Application du patch
+        asyncio.proactor_events._ProactorBasePipeTransport.__del__ = silent_del
+    except (ImportError, AttributeError):
+        pass  # Si le module n'est pas trouvé ou si la classe n'existe pas
+
+# Désactiver les avertissements liés à asyncio
+logging.getLogger('asyncio').setLevel(logging.ERROR)
+
 # Fonction pour détecter le niveau d'accès Alpaca
 def detect_alpaca_level(api_key=None, api_secret=None, base_url=None, data_url=None):
     """
@@ -83,7 +118,7 @@ def detect_alpaca_level(api_key=None, api_secret=None, base_url=None, data_url=N
             symbol = "BTC/USD"  # Une paire crypto populaire
             bars = api.get_crypto_bars(symbol, '1Min', start.isoformat(), end.isoformat())
             if len(bars) > 0 and hasattr(bars[0], 'trade_count'):
-                logger.info("✅ Niveau 3 (Premium) détecté - Accès complet aux données temps réel")
+                logger.info("[OK] Niveau 3 (Premium) détecté - Accès complet aux données temps réel")
                 return 3
         except Exception as e:
             logger.debug(f"Test niveau 3 échoué: {str(e)}")
@@ -116,8 +151,20 @@ def detect_alpaca_level(api_key=None, api_secret=None, base_url=None, data_url=N
         logger.error(f"Erreur lors de la connexion à Alpaca: {str(e)}")
         return 0
 
-# Configuration du logger
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Configuration du logger avec encodage UTF-8
+try:
+    # Configurer l'encodage de la console sur Windows
+    if sys.platform == 'win32':
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+    
+    # Configuration du logger avec encodage UTF-8
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", encoding='utf-8')
+except Exception:
+    # Fallback si l'encodage échoue
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 logger = logging.getLogger("strategy_crypto_trader")
 
 # Importation de l'utilitaire d'arrêt propre
@@ -693,6 +740,8 @@ def main():
                        help="Poids du sentiment dans la stratégie LLM_V2 (default: 0.7)")
     parser.add_argument("--min-confidence", type=float, default=0.6,
                        help="Confiance minimale pour les signaux de la stratégie LLM_V2 (default: 0.6)")
+    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo", "binance"], default="alpaca",
+                       help="Fournisseur de données à utiliser (default: alpaca)")
     
     args = parser.parse_args()
     
@@ -738,6 +787,7 @@ def main():
     print(f"Stop-loss: {args.stop_loss * 100}%")
     print(f"Take-profit: {args.take_profit * 100}%")
     print(f"Niveau d'API Alpaca: {api_level if api_level > 0 else 'Non détecté - utilisation du niveau 1'}")
+    print(f"Fournisseur de données: {args.data_provider}")
     
     if args.strategy == StrategyType.MOVING_AVERAGE:
         print(f"MA rapide: {args.fast_ma} minutes")
@@ -1020,10 +1070,18 @@ def main():
                       help="Réentraîner le modèle avant utilisation")
     
     # Option pour le fournisseur de données de marché
-    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo"], default="alpaca",
-                      help="Fournisseur de données de marché à utiliser (alpaca ou yahoo)")
+    parser.add_argument("--data-provider", type=str, choices=["alpaca", "yahoo", "binance"], default="binance",
+                      help="Fournisseur de données de marché à utiliser (binance recommandé pour crypto)")
+    
     
     args = parser.parse_args()
+    
+    # Afficher un message sur le fournisseur de données
+    print(f"Fournisseur de données sélectionné: {args.data_provider}")
+    if args.data_provider == "binance":
+        print("Binance est le fournisseur recommandé pour les données crypto - accès sans API key requis")
+    elif args.data_provider == "alpaca":
+        print("Note: Alpaca peut renvoyer des erreurs 404 pour certains symboles crypto si vous n'avez pas d'abonnement")
     
     # Chargement des symboles
     global PERSONALIZED_CRYPTO_LIST

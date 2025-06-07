@@ -163,7 +163,7 @@ python scripts/run_strategy_crypto_trader.py --strategy transformer --duration 8
 python scripts/run_strategy_crypto_trader.py --strategy transformer --sequence-length 120 --d-model 128 --nhead 8 --position-size 0.01 --stop-loss 0.02 --take-profit 0.05 --use-gpu --use-custom-symbols
 
 # Trading avec Transformer personnalisé pour marchés volatils (risque accru)
-python scripts/run_strategy_crypto_trader.py --strategy transformer --duration night --sequence-length 120 --d-model 128 --nhead 8 --num-layers 3 --signal-threshold 0.6 --position-size 0.015 --stop-loss 0.02 --take-profit 0.05 --use-gpu --use-custom-symbols
+python scripts/run_strategy_crypto_trader.py --strategy transformer --duration night --sequence-length 120 --d-model 128 --nhead 8 --num-layers 3 --signal-threshold 0.6 --position-size 0.015 --stop-loss 0.02 --take-profit 0.05 --use-gpu --use-custom-symbols --data-provider binance
 
 # Trading en utilisant Yahoo Finance comme source de données de marché
 python scripts/run_strategy_crypto_trader.py --strategy moving_average --data-provider yahoo
