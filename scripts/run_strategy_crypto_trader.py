@@ -646,13 +646,22 @@ def get_strategy_class(strategy_type: str) -> Optional[type]:
             logger.warning("Stratégie MovingAverageML non disponible, utilisation de la stratégie par défaut")
             return None
         
+    # Import direct de LLMStrategyV2 pour éviter une référence circulaire
+    try:
+        from app.strategies.llm_strategy_v2 import LLMStrategyV2
+        llm_v2_class = LLMStrategyV2
+    except ImportError:
+        logger.warning("Stratégie LLM_V2 non disponible, utilisation de la stratégie par défaut")
+        llm_v2_class = None
+        
     strategy_map = {
         StrategyType.MOMENTUM: MomentumStrategy,
         StrategyType.MEAN_REVERSION: MeanReversionStrategy,
         StrategyType.BREAKOUT: BreakoutStrategy,
         StrategyType.STATISTICAL_ARBITRAGE: StatisticalArbitrageStrategy,
         StrategyType.LSTM: LSTMPredictorStrategy, 
-        StrategyType.LLM: LLMStrategy
+        StrategyType.LLM: LLMStrategy,
+        StrategyType.LLM_V2: llm_v2_class
     }
     return strategy_map.get(strategy_type.lower())
 
@@ -875,6 +884,22 @@ def main():
             print(f"  - NewsAPI: Configuré")
         else:
             print(f"  - NewsAPI: Non configuré (utilisation du mode fallback)")
+            
+        # Vérifier si la clé API Anthropic est disponible (pour Claude)
+        if "claude" in args.model_name.lower():
+            anthropic_api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if anthropic_api_key:
+                print(f"  - Anthropic API: Configuré pour {args.model_name}")
+            else:
+                print(f"  - Anthropic API: Non configuré (requis pour Claude)")
+                logger.warning("La clé API Anthropic est requise pour utiliser Claude. Définissez ANTHROPIC_API_KEY dans .env ou utilisez --api-key.")
+        elif "gpt" in args.model_name.lower() or "openai" in args.model_name.lower():
+            openai_api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+            if openai_api_key:
+                print(f"  - OpenAI API: Configuré pour {args.model_name}")
+            else:
+                print(f"  - OpenAI API: Non configuré (requis pour GPT)")
+                logger.warning("La clé API OpenAI est requise pour utiliser GPT. Définissez OPENAI_API_KEY dans .env ou utilisez --api-key.")
     
     print("=" * 60)
     
@@ -922,35 +947,36 @@ def main():
         
         # Paramètres spécifiques à la stratégie
         strategy_params = {}
-        if args.strategy == StrategyType.MOMENTUM:
+        strategy_type = args.strategy
+        if strategy_type == StrategyType.MOMENTUM.value:
             strategy_params = {
                 "lookback_period": args.momentum_lookback,
                 "position_size": args.position_size,
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif args.strategy == StrategyType.MEAN_REVERSION:
+        elif strategy_type == StrategyType.MEAN_REVERSION.value:
             strategy_params = {
                 "lookback_period": args.mean_reversion_lookback,
                 "position_size": args.position_size,
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif args.strategy == StrategyType.BREAKOUT:
+        elif strategy_type == StrategyType.BREAKOUT.value:
             strategy_params = {
                 "lookback_period": args.breakout_lookback,
                 "position_size": args.position_size,
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif args.strategy == StrategyType.STATISTICAL_ARBITRAGE:
+        elif strategy_type == StrategyType.STATISTICAL_ARBITRAGE.value:
             strategy_params = {
                 "volatility_lookback": args.volatility_lookback,
                 "position_size": args.position_size,
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif args.strategy == StrategyType.TRANSFORMER:
+        elif strategy_type == StrategyType.TRANSFORMER.value:
             strategy_params = {
                 "sequence_length": args.sequence_length,
                 "prediction_horizon": args.prediction_horizon,
@@ -965,7 +991,7 @@ def main():
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif strategy_upper == StrategyType.LSTM:
+        elif strategy_type == StrategyType.LSTM.value:
             strategy_params = {
                 "sequence_length": args.sequence_length,
                 "prediction_horizon": args.prediction_horizon,
@@ -979,7 +1005,7 @@ def main():
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
             }
-        elif strategy_upper == StrategyType.LLM:
+        elif strategy_type == StrategyType.LLM.value:
             strategy_params = {
                 "model_name": args.model_name,
                 "use_local_model": args.use_local_model,
@@ -990,6 +1016,21 @@ def main():
                 "position_size": args.position_size,
                 "stop_loss": args.stop_loss,
                 "take_profit": args.take_profit
+            }
+        elif strategy_type == StrategyType.LLM_V2.value:
+            strategy_params = {
+                "model_name": args.model_name,
+                "use_local_model": args.use_local_model,
+                "local_model_path": args.local_model_path,
+                "api_key": args.api_key,
+                "sentiment_threshold": args.sentiment_threshold,
+                "sentiment_weight": args.sentiment_weight,
+                "min_confidence": args.min_confidence,
+                "news_lookback_hours": args.news_lookback,
+                "position_size": args.position_size,
+                "stop_loss": args.stop_loss,
+                "take_profit": args.take_profit,
+                "technical_weight": 1.0 - args.sentiment_weight  # Poids complémentaire pour l'analyse technique
             }
         
         # Créer l'instance de stratégie

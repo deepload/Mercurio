@@ -36,7 +36,7 @@ def test_anthropic_direct():
         return
     
     # Modèle à tester
-    model_name = "claude-3-7-sonnet-20240620"  # Claude 3.7 Sonnet - le plus récent
+    model_name = "claude-3-opus-20240229"  # Claude 3 Opus - modèle confirmé fonctionnel
     
     logger.info(f"Test du modèle: {model_name}")
     
@@ -60,8 +60,20 @@ def test_anthropic_direct():
         
         # Afficher la réponse
         logger.info(f"Réponse de {model_name}:")
-        print("-" * 80)
-        print(response.content[0].text)
+        response_text = response.content[0].text
+        
+        # Enregistrer la réponse dans un fichier
+        with open("claude_response.txt", "w", encoding="utf-8") as f:
+            f.write(f"Réponse de {model_name}:\n")
+            f.write("-" * 80 + "\n")
+            f.write(response_text + "\n")
+            f.write("-" * 80 + "\n")
+            
+        print(f"Réponse enregistrée dans le fichier claude_response.txt")
+        
+        # Afficher les premiers 200 caractères de la réponse
+        print("Début de la réponse:")
+        print(response_text[:200] + "...")
         print("-" * 80)
         
     except Exception as e:
