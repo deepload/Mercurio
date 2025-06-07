@@ -33,6 +33,7 @@ from alpaca_crypto_trader import AlpacaCryptoTrader, SessionDuration
 from app.strategies.lstm_predictor import LSTMPredictorStrategy
 from app.strategies.llm_strategy import LLMStrategy
 from app.strategies.llm_strategy_v2 import LLMStrategyV2
+from app.strategies.sentiment.news_api_agent import NewsAPIAgent
 
 # Importer les fournisseurs de données
 from app.services.providers.binance import BinanceProvider
@@ -751,6 +752,8 @@ def parse_arguments():
                       help="Chemin vers le modèle LLM local")
     parser.add_argument("--api-key", type=str, 
                       help="Clé API pour le modèle LLM (si nécessaire)")
+    parser.add_argument("--newsapi-key", type=str, 
+                      help="Clé API pour NewsAPI.org (si non définie dans .env)")
     parser.add_argument("--sentiment-threshold", type=float, default=0.6, 
                       help="Seuil de sentiment pour la stratégie LLM")
     parser.add_argument("--sentiment-weight", type=float, default=0.5, 
@@ -856,14 +859,22 @@ def main():
         print(f"  - Epochs: {args.lstm_epochs}")
         print(f"  - Batch size: {args.lstm_batch_size}")
         print(f"  - GPU: {'Activé' if args.use_gpu else 'Désactivé'}")
-    elif args.strategy == StrategyType.LLM:
+    elif args.strategy in [StrategyType.LLM.value, StrategyType.LLM_V2.value]:
         print(f"LLM configuration:")
         print(f"  - Model name: {args.model_name}")
         print(f"  - Use local model: {'Oui' if args.use_local_model else 'Non'}")
         if args.use_local_model and args.local_model_path:
             print(f"  - Local model path: {args.local_model_path}")
         print(f"  - Sentiment threshold: {args.sentiment_threshold}")
+        print(f"  - Sentiment weight: {args.sentiment_weight}")
         print(f"  - News lookback hours: {args.news_lookback}")
+        
+        # Vérifier si la clé NewsAPI est disponible
+        newsapi_key = args.newsapi_key or os.environ.get("NEWSAPI_KEY")
+        if newsapi_key:
+            print(f"  - NewsAPI: Configuré")
+        else:
+            print(f"  - NewsAPI: Non configuré (utilisation du mode fallback)")
     
     print("=" * 60)
     
@@ -1152,7 +1163,10 @@ def main():
             "use_gpu": args.use_gpu,
             "retrain": args.retrain
         }
-    elif strategy_type in [StrategyType.LLM.value, StrategyType.LLM_V2.value]:
+    elif args.strategy in [StrategyType.LLM.value, StrategyType.LLM_V2.value]:
+        # Récupérer la clé NewsAPI depuis les arguments ou l'environnement
+        newsapi_key = args.newsapi_key or os.environ.get("NEWSAPI_KEY")
+        
         strategy_params = {
             "model_name": args.model_name,
             "use_local_model": args.use_local_model,
@@ -1161,8 +1175,12 @@ def main():
             "sentiment_threshold": args.sentiment_threshold,
             "sentiment_weight": args.sentiment_weight,
             "min_confidence": args.min_confidence,
-            "news_lookback": args.news_lookback
+            "news_lookback_hours": args.news_lookback  # Assurez-vous que le nom correspond au paramètre dans LLMStrategyV2
         }
+        
+        # Ajouter la clé NewsAPI si disponible
+        if newsapi_key:
+            strategy_params["newsapi_key"] = newsapi_key
     
     # Initialiser le trader avec les paramètres spécifiés et la stratégie configurée
     trader = initialize_trader(

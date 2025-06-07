@@ -171,6 +171,18 @@ python scripts/run_strategy_crypto_trader.py --strategy moving_average --data-pr
 # Trading avec LLMStrategyV2 et Yahoo Finance pour les données de marché
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --data-provider yahoo --use-custom-symbols
 
+# Trading avec LLMStrategyV2 et Binance pour les données de marché
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 24 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance
+
+# Trading avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h
+
+#Trading risqué avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05
+
+#Trading en short avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05 --short
+
 # Trading avec la stratégie LLM de base pour analyse de sentiment
 python scripts/run_strategy_crypto_trader.py --strategy llm --news-lookback 48 --sentiment-threshold 0.6 --position-size 0.02 --use-custom-symbols
 

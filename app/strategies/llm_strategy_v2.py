@@ -25,6 +25,7 @@ from app.services.market_data import MarketDataService
 from app.utils.llm_utils import load_llm_model, call_llm
 from app.strategies.sentiment.web_sentiment_agent import LLMWebSentimentAgent
 from app.strategies.sentiment.enhanced_web_sentiment import EnhancedWebSentimentAgent
+from app.strategies.sentiment.news_api_agent import NewsAPIAgent
 
 logger = logging.getLogger(__name__)
 
@@ -146,18 +147,28 @@ class LLMStrategyV2(BaseStrategy):
             logger.warning("Using fallback for LLM operations")
     
     def _initialize_sentiment_agent(self):
-        """Initialize enhanced web sentiment analysis agent that always uses real web data"""
+        """Initialize enhanced web sentiment analysis agent and NewsAPI agent"""
         try:
-            logger.info("Initializing enhanced web sentiment agent with real data")
+            # Initialize web sentiment agent
             self.sentiment_agent = EnhancedWebSentimentAgent(
                 model_name=self.sentiment_model_name,
                 use_local_model=self.use_local_model,
                 local_model_path=self.local_model_path,
                 api_key=self.api_key
             )
-            logger.info("Enhanced web sentiment agent initialized successfully")
+            logger.info(f"Initialized enhanced web sentiment agent with model {self.sentiment_model_name}")
+            
+            # Initialize NewsAPI agent for real-time news data
+            self.news_agent = NewsAPIAgent(
+                lookback_hours=self.news_lookback_hours,
+                use_fallback=True
+            )
+            logger.info(f"Initialized NewsAPI agent with {self.news_lookback_hours} hour lookback")
+            
         except Exception as e:
-            logger.error(f"Failed to initialize enhanced sentiment agent: {str(e)}")
+            logger.error(f"Failed to initialize sentiment agents: {str(e)}")
+            self.sentiment_agent = None
+            self.news_agent = None
             logger.warning("Falling back to standard web sentiment agent")
             try:
                 self.sentiment_agent = LLMWebSentimentAgent(
@@ -373,28 +384,35 @@ class LLMStrategyV2(BaseStrategy):
             return TradeAction.HOLD, 0.0
     
     async def _generate_sentiment_signal(self, symbol: str) -> Tuple[TradeAction, float]:
-        """Generate trading signal based on sentiment analysis"""
+        """Generate trading signal based on sentiment analysis from web and news sources"""
+        if not self.use_web_sentiment or not self.sentiment_agent:
+            return TradeAction.HOLD, 0.5
+        
         try:
-            if not self.sentiment_agent:
-                return TradeAction.HOLD, 0.0
-                
-            # Run sentiment analysis
-            sentiment_data = await self.sentiment_agent.run_analysis_async(symbol)
+            # Get sentiment from web sources
+            web_sentiment = await self.sentiment_agent.analyze_sentiment(symbol)
+            web_score = web_sentiment.get("score", 0.5)
             
-            if not sentiment_data:
-                return TradeAction.HOLD, 0.0
-                
-            # Map sentiment action to TradeAction
-            action_str = sentiment_data.get('action', 'HOLD').upper()
-            action_map = {
-                'BUY': TradeAction.BUY,
-                'SELL': TradeAction.SELL,
-                'HOLD': TradeAction.HOLD
-            }
+            # Get news articles from NewsAPI
+            news_articles = []
+            if self.news_agent:
+                news_articles = await self.news_agent.get_news_for_symbol(symbol)
+                logger.info(f"Found {len(news_articles)} news articles for {symbol}")
             
-            action = action_map.get(action_str, TradeAction.HOLD)
-            confidence = float(sentiment_data.get('confidence', 0.5))
+            # Analyze news sentiment if articles are available
+            news_sentiment = {"sentiment": "neutral", "confidence": 0.5, "sources": 0}
+            if news_articles and self.news_agent:
+                news_sentiment = await self.news_agent.analyze_sentiment(news_articles, self.sentiment_agent)
+                logger.info(f"News sentiment for {symbol}: {news_sentiment['sentiment']} with confidence {news_sentiment['confidence']}")
             
+            # Combine web and news sentiment
+            combined_score = web_score
+            if news_sentiment["sources"] > 0:
+                # Weight news more heavily if we have articles (60% news, 40% web)
+                news_score = 1.0 if news_sentiment["sentiment"] == "bullish" else (
+                              0.0 if news_sentiment["sentiment"] == "bearish" else 0.5)
+                combined_score = (news_score * 0.6 * news_sentiment["confidence"]) + (web_score * 0.4)
+                logger.info(f"Combined sentiment score for {symbol}: {combined_score:.2f}")
             return action, confidence
             
         except Exception as e:
@@ -772,11 +790,14 @@ async def test_strategy():
     """Test the strategy with a sample"""
     logging.basicConfig(level=logging.INFO)
     
-    # Create the strategy
-    strategy = LLMStrategyV2()
+    # Create the strategy with NewsAPI integration
+    strategy = LLMStrategyV2(
+        news_lookback_hours=24,  # Look for news from the last 24 hours
+        sentiment_weight=0.6     # Give more weight to sentiment vs technical analysis
+    )
     
     # Load some data
-    symbol = "BTCUSD"
+    symbol = "BTC/USD"  # Use standard format for crypto pairs
     end_date = datetime.now()
     start_date = end_date - timedelta(days=60)
     
@@ -792,6 +813,15 @@ async def test_strategy():
         print(f"\nResults for {symbol}:")
         print(f"Action: {action.name}")
         print(f"Confidence: {confidence:.2f}")
+        
+        # Show news sentiment if available
+        if hasattr(strategy, 'news_agent') and strategy.news_agent:
+            news_articles = await strategy.news_agent.get_news_for_symbol(symbol)
+            if news_articles:
+                print(f"\nFound {len(news_articles)} recent news articles about {symbol.split('/')[0]}")
+                print("Top 3 headlines:")
+                for i, article in enumerate(news_articles[:3]):
+                    print(f"  {i+1}. {article.get('title', 'No title')} - {article.get('source', {}).get('name', 'Unknown')}")
     else:
         print("No data available for testing")
 
