@@ -33,6 +33,7 @@ from alpaca_crypto_trader import AlpacaCryptoTrader, SessionDuration
 from app.strategies.lstm_predictor import LSTMPredictorStrategy
 from app.strategies.llm_strategy import LLMStrategy
 from app.strategies.llm_strategy_v2 import LLMStrategyV2
+from app.strategies.llm_strategy_v3 import LLMStrategyV3
 from app.strategies.sentiment.news_api_agent import NewsAPIAgent
 
 # Importer les fournisseurs de données
@@ -487,6 +488,7 @@ class StrategyType(str, Enum):
     LSTM = "lstm"
     LLM = "llm"  # Stratégie basée sur un modèle LLM de deep learning
     LLM_V2 = "llm_v2"  # Stratégie avancée LLM combinant analyse technique et sentiment
+    LLM_V3 = "llm_v3"  # Stratégie multi-agent LLM avec architecture Claude Trader, Analyste, Coordinateur
 
 def get_strategy_class(strategy_type: str) -> Optional[type]:
     """Récupère la classe de stratégie en fonction du type spécifié"""
@@ -506,6 +508,15 @@ def get_strategy_class(strategy_type: str) -> Optional[type]:
             return LLMStrategyV2
         except ImportError:
             logger.warning("Stratégie LLM_V2 non disponible, utilisation de la stratégie par défaut")
+            return None
+            
+    # Nouvelle stratégie LLM_V3 (multi-agent)
+    if strategy_type.lower() == StrategyType.LLM_V3.lower():
+        try:
+            from app.strategies.llm_strategy_v3 import LLMStrategyV3
+            return LLMStrategyV3
+        except ImportError:
+            logger.warning("Stratégie LLM_V3 non disponible, utilisation de la stratégie par défaut")
             return None
     
     # Import de MovingAverageMLStrategy si nécessaire
@@ -654,6 +665,14 @@ def get_strategy_class(strategy_type: str) -> Optional[type]:
         logger.warning("Stratégie LLM_V2 non disponible, utilisation de la stratégie par défaut")
         llm_v2_class = None
         
+    # Import de LLMStrategyV3 pour le mapping
+    try:
+        from app.strategies.llm_strategy_v3 import LLMStrategyV3
+        llm_v3_class = LLMStrategyV3
+    except ImportError:
+        logger.warning("Stratégie LLM_V3 non disponible, utilisation de la stratégie par défaut")
+        llm_v3_class = None
+        
     strategy_map = {
         StrategyType.MOMENTUM: MomentumStrategy,
         StrategyType.MEAN_REVERSION: MeanReversionStrategy,
@@ -661,7 +680,8 @@ def get_strategy_class(strategy_type: str) -> Optional[type]:
         StrategyType.STATISTICAL_ARBITRAGE: StatisticalArbitrageStrategy,
         StrategyType.LSTM: LSTMPredictorStrategy, 
         StrategyType.LLM: LLMStrategy,
-        StrategyType.LLM_V2: llm_v2_class
+        StrategyType.LLM_V2: llm_v2_class,
+        StrategyType.LLM_V3: llm_v3_class
     }
     return strategy_map.get(strategy_type.lower())
 
@@ -754,7 +774,7 @@ def parse_arguments():
     
     # LLM
     parser.add_argument("--model-name", type=str, default="gpt-3.5-turbo", 
-                      help="Nom du modèle LLM à utiliser")
+                      help="Nom du modèle LLM à utiliser (pour LLM et LLM_V2)")
     parser.add_argument("--use-local-model", action="store_true", 
                       help="Utiliser un modèle LLM local")
     parser.add_argument("--local-model-path", type=str, 
@@ -771,6 +791,14 @@ def parse_arguments():
                       help="Seuil minimal de confiance pour les signaux de trading")
     parser.add_argument("--news-lookback", type=int, default=24, 
                       help="Période de recherche d'actualités (en heures)")
+    
+    # LLM_V3 (multi-agent)
+    parser.add_argument("--trader-model-name", type=str, default="claude-3-7-sonnet-20240620", 
+                      help="Nom du modèle Claude pour l'agent Trader (LLM_V3)")
+    parser.add_argument("--analyst-model-name", type=str, default="claude-3-7-sonnet-20240620", 
+                      help="Nom du modèle Claude pour l'agent Analyste (LLM_V3)")
+    parser.add_argument("--coordinator-model-name", type=str, default="claude-3-7-sonnet-20240620", 
+                      help="Nom du modèle Claude pour l'agent Coordinateur (LLM_V3)")
     
     # Options communes
     parser.add_argument("--use-gpu", action="store_true", 
@@ -1217,6 +1245,31 @@ def main():
             "sentiment_weight": args.sentiment_weight,
             "min_confidence": args.min_confidence,
             "news_lookback_hours": args.news_lookback  # Assurez-vous que le nom correspond au paramètre dans LLMStrategyV2
+        }
+        
+        # Ajouter la clé NewsAPI si disponible
+        if newsapi_key:
+            strategy_params["newsapi_key"] = newsapi_key
+    
+    elif args.strategy == StrategyType.LLM_V3.value:
+        # Récupérer la clé NewsAPI depuis les arguments ou l'environnement
+        newsapi_key = args.newsapi_key or os.environ.get("NEWSAPI_KEY")
+        
+        # Paramètres spécifiques à la stratégie multi-agent LLM_V3
+        strategy_params = {
+            "trader_model_name": args.trader_model_name,
+            "analyst_model_name": args.analyst_model_name,
+            "coordinator_model_name": args.coordinator_model_name,
+            "api_key": args.api_key,
+            "use_local_model": args.use_local_model,
+            "local_model_path": args.local_model_path,
+            "sentiment_weight": args.sentiment_weight,
+            "min_confidence": args.min_confidence,
+            "news_lookback_hours": args.news_lookback,
+            "position_size": args.position_size,
+            "stop_loss": args.stop_loss,
+            "take_profit": args.take_profit,
+            "data_provider": args.data_provider
         }
         
         # Ajouter la clé NewsAPI si disponible
