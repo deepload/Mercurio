@@ -180,6 +180,9 @@ python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2
 #Trading risqué avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05
 
+#Trading avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures avec Claude 3.7
+python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --model-name claude-3-7-sonnet-20240620 --sentiment-weight 0.7 --min-confidence 0.65 --news-lookback 24 --position-size 0.03 --use-custom-symbols
+
 #Trading en short avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05 --short
 

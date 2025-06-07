@@ -11,6 +11,13 @@ import requests
 import json
 from typing import Any, Dict, Optional, Union
 
+# Import pour Anthropic
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    
 logger = logging.getLogger(__name__)
 
 def load_llm_model(model_name: str, use_local: bool = False, 
@@ -110,8 +117,25 @@ def _initialize_remote_client(model_name: str, api_key: Optional[str] = None) ->
     try:
         model_type = model_name.lower()
         
+        # Check for Anthropic Claude models
+        if any(x in model_type for x in ['claude', 'anthropic']) and ANTHROPIC_AVAILABLE:
+            try:
+                # Setup API key from parameter or environment
+                claude_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+                if not claude_api_key:
+                    logger.error("No Anthropic API key provided")
+                    return None
+                    
+                logger.info(f"Initialized Anthropic client for model {model_name}")
+                client = anthropic.Anthropic(api_key=claude_api_key)
+                client.model_name = model_name  # Store the model name for later use
+                return client
+            except Exception as e:
+                logger.error(f"Error initializing Anthropic client: {str(e)}")
+                return None
+                
         # Check for OpenAI models
-        if any(x in model_type for x in ['gpt', 'openai']):
+        elif any(x in model_type for x in ['gpt', 'openai']):
             try:
                 import openai
                 
@@ -172,7 +196,7 @@ def _initialize_remote_client(model_name: str, api_key: Optional[str] = None) ->
 
 def call_llm(model, prompt: str, temperature: float = 0.1, 
             max_tokens: int = 1024, stop_sequences: list = None, 
-            force_real_llm: bool = False) -> str:
+            force_real_llm: bool = False, system_prompt: str = None) -> str:
     """
     Generate text from a prompt using the given LLM model.
     
@@ -199,8 +223,29 @@ def call_llm(model, prompt: str, temperature: float = 0.1,
         return "Error: Model not available. Please check logs."
     
     try:
+        # Handle Anthropic API
+        if hasattr(model, "messages") and ANTHROPIC_AVAILABLE:
+            try:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                response = model.messages.create(
+                    model=model.model_name if hasattr(model, "model_name") else "claude-3-5-sonnet-20241022",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stop_sequences=stop_sequences
+                )
+                
+                return response.content[0].text
+            except Exception as e:
+                logger.error(f"Error with Anthropic API: {str(e)}")
+                return f"Error with Anthropic API: {str(e)}"
+                
         # Handle OpenAI API
-        if hasattr(model, "ChatCompletion") or (isinstance(model, dict) and "openai" in str(model).lower()):
+        elif hasattr(model, "ChatCompletion") or (isinstance(model, dict) and "openai" in str(model).lower()):
             openai_model = model.ChatCompletion if hasattr(model, "ChatCompletion") else model
             
             response = openai_model.create(
