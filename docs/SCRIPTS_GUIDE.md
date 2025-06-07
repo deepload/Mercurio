@@ -186,6 +186,9 @@ python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --model-name clau
 #Trading avec LLMStrategyV3 et Binance pour les données de marché sur une session de 48 heures avec Claude 3.7
  python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --use-custom-symbols --duration continuous --trader-model-name claude-3-7-sonnet-20240620 --analyst-model-name claude-3-7-sonnet-20240620 --coordinator-model-name claude-3-7-sonnet-20240620 --news-lookback 30 --min-confidence 0.65 --data-provider binance
 
+#Trading avec LLMStrategyV3 et Binance pour les données de marché sur une session de 1 heure avec Claude 3.7
+ python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --use-custom-symbols --duration 1h --trader-model-name claude-3-7-sonnet-20240620 --analyst-model-name claude-3-7-sonnet-20240620 --coordinator-model-name claude-3-7-sonnet-20240620 --news-lookback 30 --min-confidence 0.65 --data-provider binance
+
 #Trading en short avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05 --short
 

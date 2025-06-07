@@ -1015,6 +1015,10 @@ class LLMStrategyV3(BaseStrategy):
             f"AMÉLIORATION: [comment tu as amélioré ton analyse par rapport aux précédentes]\n\n"
             f"Actualités des dernières {self.news_lookback_hours} heures:\n{news_context}"
         )
+        
+        # Afficher le prompt de l'analyste
+        logger.info(f"===== PROMPT ANALYSTE POUR {symbol} =====\n{analyst_prompt}\n==================================")
+        
         analyst_response = call_llm(self.claude_analyst, analyst_prompt, temperature=0.2, max_tokens=512)
         
         # Sauvegarder la décision de l'analyste
@@ -1041,6 +1045,10 @@ class LLMStrategyV3(BaseStrategy):
             f"ANALYSE: [justification brève de ta décision]\n"
             f"AMÉLIORATION: [comment tu as amélioré ta stratégie par rapport aux décisions précédentes]\n"
         )
+        
+        # Afficher le prompt du trader
+        logger.info(f"===== PROMPT TRADER POUR {symbol} =====\n{tech_prompt}\n==================================")
+        
         trader_response = call_llm(self.claude_trader, tech_prompt, temperature=0.2, max_tokens=512)
         
         # Sauvegarder la décision du trader
@@ -1080,6 +1088,10 @@ class LLMStrategyV3(BaseStrategy):
             f"JUSTIFICATION: [explication concise de ta décision finale]\n"
             f"AMÉLIORATION: [comment tu as amélioré ta décision par rapport aux précédentes]\n"
         )
+        
+        # Afficher le prompt du coordinateur
+        logger.info(f"===== PROMPT COORDINATEUR POUR {symbol} =====\n{coordinator_prompt}\n===================================")
+        
         coordinator_response = call_llm(self.claude_coordinator, coordinator_prompt, temperature=0.3, max_tokens=1024)
         
         # Sauvegarder la décision du coordinateur
