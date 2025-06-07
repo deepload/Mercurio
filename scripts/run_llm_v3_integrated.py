@@ -62,18 +62,39 @@ def run_trading(config_file: str, symbols: List[str], duration: str = "1h") -> N
     """
     logger.info(f"Démarrage du trading pour {len(symbols)} symboles")
     
-    # Construire la commande
+    # Charger la configuration
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            strategy_params = config.get("params", {})
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement de la configuration: {e}")
+        strategy_params = {}
+    
+    # Construire la commande avec le chemin absolu vers le script
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_strategy_crypto_trader.py")
     cmd = [
         sys.executable,
-        "run_strategy_crypto_trader.py",
+        script_path,
         "--strategy", "llm_v3",
-        "--config", config_file,
         "--duration", duration
     ]
     
-    # Ajouter les symboles
-    for symbol in symbols:
-        cmd.extend(["--symbol", symbol])
+    # Ajouter les symboles (en format CSV pour run_strategy_crypto_trader.py)
+    if symbols:
+        cmd.extend(["--symbols", ",".join(symbols)])
+        
+    # Ajouter les paramètres spécifiques à LLM_V3 depuis le fichier de configuration
+    if "trader_model_name" in strategy_params:
+        cmd.extend(["--trader-model-name", strategy_params["trader_model_name"]])
+    if "analyst_model_name" in strategy_params:
+        cmd.extend(["--analyst-model-name", strategy_params["analyst_model_name"]])
+    if "coordinator_model_name" in strategy_params:
+        cmd.extend(["--coordinator-model-name", strategy_params["coordinator_model_name"]])
+    if "news_lookback_hours" in strategy_params:
+        cmd.extend(["--news-lookback", str(strategy_params["news_lookback_hours"])])
+    if "min_confidence" in strategy_params:
+        cmd.extend(["--min-confidence", str(strategy_params["min_confidence"])])
     
     # Exécuter la commande
     try:
@@ -92,17 +113,19 @@ def run_training(config_file: str, symbols: List[str]) -> None:
     """
     logger.info(f"Démarrage de l'entraînement pour {len(symbols)} symboles")
     
-    # Construire la commande
+    # Construire la commande avec le chemin absolu vers le script
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_v3_training.py")
     cmd = [
         sys.executable,
-        "llm_v3_training.py",
+        script_path,
         "--config", config_file,
         "--export-stats"
     ]
     
-    # Ajouter les symboles
-    for symbol in symbols:
-        cmd.extend(["--symbols", symbol])
+    # Ajouter les symboles (en une seule fois avec nargs=+)
+    if symbols:
+        cmd.append("--symbols")
+        cmd.extend(symbols)
     
     # Exécuter la commande
     try:
@@ -142,7 +165,8 @@ def main():
     Point d'entrée principal du script
     """
     parser = argparse.ArgumentParser(description="Trading et entraînement intégrés pour la stratégie LLM_V3")
-    parser.add_argument("--config", type=str, default="../custom_strategy_llm_v3_params.json", 
+    default_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "custom_strategy_llm_v3_params.json")
+    parser.add_argument("--config", type=str, default=default_config_path, 
                         help="Chemin vers le fichier de configuration")
     parser.add_argument("--symbols", type=str, nargs="+", 
                         help="Liste des symboles à trader (par défaut: depuis la configuration)")
