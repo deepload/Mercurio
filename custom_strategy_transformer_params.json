@@ -11,5 +11,33 @@
     "use_gpu": true,
     "retrain": false
   },
-  "symbols": []
+  "symbols": [
+    "BCH/USDT",
+    "MKR/USD",
+    "LTC/USD",
+    "BAT/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "BTC/USD",
+    "AVAX/USD",
+    "BCH/BTC",
+    "DOT/USDC",
+    "USDG/USD",
+    "BCH/USD",
+    "UNI/BTC",
+    "YFI/USD",
+    "GRT/USD",
+    "LINK/USD",
+    "SUSHI/USD",
+    "UNI/USD",
+    "CRV/USD",
+    "XRP/USD",
+    "AAVE/USD",
+    "TRUMP/USD",
+    "XTZ/USD",
+    "DOT/USD",
+    "SHIB/USD",
+    "PEPE/USD",
+    "DOGE/USD"
+  ]
 }

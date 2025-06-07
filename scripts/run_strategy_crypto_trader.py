@@ -1106,11 +1106,16 @@ def main():
         PERSONALIZED_CRYPTO_LIST = symbol_list
         print(f"Chargement de {len(symbol_list)} symboles depuis {args.symbols_file}")
     
-    # 3. Enfin, vérifier la variable d'environnement
+    # 3. Ensuite, vérifier la variable d'environnement
     elif args.use_env_symbols and os.environ.get('PERSONALIZED_CRYPTO_LIST'):
         symbol_list = os.environ.get('PERSONALIZED_CRYPTO_LIST').split(',')
         PERSONALIZED_CRYPTO_LIST = [s.strip() for s in symbol_list]
         print(f"Utilisation des symboles depuis la variable d'environnement: {', '.join(PERSONALIZED_CRYPTO_LIST)}")
+    
+    # 4. Si --use-custom-symbols est utilisé sans autre source de symboles, utiliser DEFAULT_CRYPTO_LIST
+    elif args.use_custom_symbols and not PERSONALIZED_CRYPTO_LIST:
+        PERSONALIZED_CRYPTO_LIST = DEFAULT_CRYPTO_LIST
+        print(f"Utilisation de la liste par défaut avec {len(DEFAULT_CRYPTO_LIST)} cryptomonnaies")
     
     # Déterminer la durée de la session
     session_duration = args.duration
@@ -1171,9 +1176,16 @@ def main():
     )
     
     # Utiliser la liste personnalisée de symboles si spécifiée
-    if PERSONALIZED_CRYPTO_LIST:
+    if args.use_custom_symbols:
+        # Si PERSONALIZED_CRYPTO_LIST est vide, utiliser DEFAULT_CRYPTO_LIST
+        if not PERSONALIZED_CRYPTO_LIST:
+            PERSONALIZED_CRYPTO_LIST = DEFAULT_CRYPTO_LIST
+            print(f"Utilisation de la liste par défaut avec {len(DEFAULT_CRYPTO_LIST)} cryptomonnaies")
         trader.custom_symbols = PERSONALIZED_CRYPTO_LIST
-        trader.use_custom_symbols = args.use_custom_symbols or args.symbols_file or args.use_env_symbols or args.symbols
+        trader.use_custom_symbols = True
+    elif PERSONALIZED_CRYPTO_LIST:
+        trader.custom_symbols = PERSONALIZED_CRYPTO_LIST
+        trader.use_custom_symbols = True
     
     # Enregistrer la configuration de stratégie si nécessaire
     strategy_file = f"custom_strategy_{strategy_type}_params.json"
