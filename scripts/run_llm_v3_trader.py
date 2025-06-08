@@ -138,7 +138,7 @@ def main():
         adapted_params = {}
         
         # Paramètres des modèles
-        model_name = strategy_params.get('model_name', 'claude-3-7-sonnet-20240620')
+        model_name = strategy_params.get('model_name', 'claude-3-5-sonnet-20240620')
         adapted_params['trader_model_name'] = strategy_params.get('trader_model_name', model_name)
         adapted_params['analyst_model_name'] = strategy_params.get('analyst_model_name', model_name)
         adapted_params['coordinator_model_name'] = strategy_params.get('coordinator_model_name', model_name)

@@ -773,16 +773,88 @@ class AlpacaCryptoTrader:
                     if isinstance(close_price, pd.Series):
                         close_price = close_price.iloc[0]
                     current_price = float(close_price)
-                    logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
+                    logger.info(f"{symbol} prix actuel (fallback dernière barre): ${current_price:.4f}")
                 else:
                     logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
                     return
         except Exception as e:
-            logger.error(f"Impossible d'obtenir le prix actuel pour {symbol}: {e}")
-            return
-        
-        # Utiliser la stratégie configurée si elle existe, sinon utiliser la stratégie par défaut
-        if hasattr(self, 'strategy') and self.strategy is not None:
+            logger.error(f"Erreur lors de la récupération du prix actuel pour {symbol}: {str(e)}")
+            # Fallback à la dernière barre si disponible
+            if not bars.empty:
+                close_price = bars.iloc[-1]['close']
+                # Corriger le FutureWarning
+                if isinstance(close_price, pd.Series):
+                    close_price = close_price.iloc[0]
+                current_price = float(close_price)
+                logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
+        # Vérifier si nous avons une stratégie LLM_V3 configurée via strategy_type et strategy_params
+        if hasattr(self, 'strategy_type') and self.strategy_type == 'llm_v3':
+            logger.info(f"Utilisation de la stratégie LLM_V3 pour {symbol}")
+            try:
+                # Importer et initialiser la stratégie LLM_V3 si nécessaire
+                from app.strategies.llm_strategy_v3 import LLMStrategyV3
+                
+                # Initialiser la stratégie LLM_V3 si elle n'existe pas encore
+                if not hasattr(self, 'llm_strategy') or self.llm_strategy is None:
+                    logger.info(f"Initialisation de la stratégie LLM_V3 avec les paramètres: {self.strategy_params}")
+                    self.llm_strategy = LLMStrategyV3(**self.strategy_params)
+                
+                # Appeler la méthode analyze de la stratégie LLM_V3
+                logger.info(f"Appel de la méthode analyze de LLM_V3 pour {symbol}")
+                result = self.llm_strategy.analyze(bars, symbol=symbol)
+                logger.info(f"Résultat de l'analyse LLM_V3 pour {symbol}: {result}")
+                
+                # Traiter le résultat
+                if result and isinstance(result, dict):
+                    # Extraire le signal et la confiance
+                    signal = 'neutral'
+                    strength = 0.0
+                    
+                    # Vérifier si nous avons une décision finale
+                    if 'final_decision' in result:
+                        if result['final_decision'] == 'BUY':
+                            signal = 'buy'
+                        elif result['final_decision'] == 'SELL':
+                            signal = 'sell'
+                        elif result['final_decision'] == 'HOLD':
+                            signal = 'neutral'
+                        strength = result.get('confidence', 0.0)
+                    elif 'action' in result:
+                        if result['action'] == 'BUY':
+                            signal = 'buy'
+                        elif result['action'] == 'SELL':
+                            signal = 'sell'
+                        elif result['action'] == 'HOLD':
+                            signal = 'neutral'
+                        strength = result.get('confidence', 0.0)
+                    
+                    reason = result.get('reason', 'Aucune raison fournie')
+                    logger.info(f"Signal LLM_V3 pour {symbol}: {signal.upper()} avec force {strength:.2f} - Raison: {reason}")
+                    
+                    # Exécuter les signaux avec un seuil de confiance minimum
+                    min_confidence = self.strategy_params.get('min_confidence', 0.5)
+                    if signal.lower() == 'buy' and not position and strength >= min_confidence:
+                        logger.info(f"Signal d'achat LLM_V3 fort ({strength:.2f}) pour {symbol}")
+                        self.execute_buy(symbol, current_price)
+                    elif signal.lower() == 'sell' and position and strength >= min_confidence:
+                        logger.info(f"Signal de vente LLM_V3 fort ({strength:.2f}) pour {symbol}")
+                        self.execute_sell(symbol, current_price, position)
+                    else:
+                        logger.info(f"Pas d'action LLM_V3 pour {symbol}: signal {signal} avec force {strength:.2f} (seuil: {min_confidence})")
+                else:
+                    logger.warning(f"Résultat LLM_V3 invalide pour {symbol}: {result}")
+                    # Fallback à la stratégie par défaut
+                    logger.info(f"Utilisation de la stratégie par défaut pour {symbol} suite à un résultat invalide")
+                    self._use_default_strategy(symbol, bars, position, current_price)
+                    
+            except Exception as e:
+                logger.error(f"Erreur lors de l'appel de la stratégie LLM_V3 pour {symbol}: {e}")
+                # Fallback à la stratégie par défaut
+                logger.info(f"Utilisation de la stratégie par défaut pour {symbol} suite à l'erreur")
+                self._use_default_strategy(symbol, bars, position, current_price)
+                
+        # Utiliser la stratégie standard si configurée
+        elif hasattr(self, 'strategy') and self.strategy is not None:
             logger.info(f"Utilisation de la stratégie {self.strategy.__class__.__name__} pour {symbol}")
             try:
                 # Appeler la méthode analyze de la stratégie avec les données historiques
@@ -829,20 +901,7 @@ class AlpacaCryptoTrader:
                 logger.error(f"Erreur lors de l'appel de la stratégie pour {symbol}: {e}")
                 # Fallback à la stratégie par défaut
                 logger.info(f"Utilisation de la stratégie par défaut pour {symbol} suite à l'erreur")
-                reason = result.get('reason', 'Aucune raison fournie')
-                
-                # Pour les stratégies LLM, vérifier aussi final_decision
-                if 'final_decision' in result:
-                    if result['final_decision'] == 'BUY':
-                        signal = 'buy'
-                    elif result['final_decision'] == 'SELL':
-                        signal = 'sell'
-                    elif result['final_decision'] == 'HOLD':
-                        signal = 'neutral'
-                    strength = result.get('confidence', 0.0)
-                
-                logger.info(f"Signal pour {symbol}: {signal.upper()} avec force {strength:.2f} - Raison: {reason}")
-                
+
                 # Exécuter les signaux
                 if signal.lower() == 'buy' and not position and strength >= 0.5:
                     logger.info(f"Signal d'achat fort ({strength:.2f}) pour {symbol}")

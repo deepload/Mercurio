@@ -83,9 +83,9 @@ async def main():
             
         # Paramètres de test
         params = {
-            "trader_model_name": "claude-3-7-sonnet-20240620",
-            "analyst_model_name": "claude-3-7-sonnet-20240620",
-            "coordinator_model_name": "claude-3-7-sonnet-20240620",
+            "trader_model_name": "claude-3-5-sonnet-20240620",
+            "analyst_model_name": "claude-3-5-sonnet-20240620",
+            "coordinator_model_name": "claude-3-5-sonnet-20240620",
             "api_key": anthropic_key,
             "newsapi_key": newsapi_key,
             "sentiment_weight": 0.6,

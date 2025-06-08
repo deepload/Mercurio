@@ -226,11 +226,11 @@ def call_llm(model, prompt: str, temperature: float = 0.1,
         # Handle Anthropic API
         if ANTHROPIC_AVAILABLE:
             try:
-                logger.info(f"Calling Anthropic API with model: {model.model_name if hasattr(model, 'model_name') else 'claude-3-7-sonnet-20240620'}")
+                logger.info(f"Calling Anthropic API with model: {model.model_name if hasattr(model, 'model_name') else 'claude-3-5-sonnet-20240620'}")
                 logger.info(f"Anthropic API version: {anthropic.__version__ if hasattr(anthropic, '__version__') else 'unknown'}")
                 
                 # Déterminer le nom du modèle à utiliser
-                model_name = model.model_name if hasattr(model, "model_name") else "claude-3-7-sonnet-20240620"
+                model_name = model.model_name if hasattr(model, "model_name") else "claude-3-5-sonnet-20240620"
                 logger.info(f"Using model: {model_name}")
                 
                 # Vérifier la version de l'API Anthropic

@@ -30,9 +30,9 @@ def main():
         
         # Paramètres minimaux pour l'initialisation
         params = {
-            "trader_model_name": "claude-3-7-sonnet-20240620",
-            "analyst_model_name": "claude-3-7-sonnet-20240620",
-            "coordinator_model_name": "claude-3-7-sonnet-20240620",
+            "trader_model_name": "claude-3-5-sonnet-20240620",
+            "analyst_model_name": "claude-3-5-sonnet-20240620",
+            "coordinator_model_name": "claude-3-5-sonnet-20240620",
             "api_key": os.getenv("ANTHROPIC_API_KEY"),
             "newsapi_key": os.getenv("NEWSAPI_KEY"),
             "sentiment_weight": 0.6,
