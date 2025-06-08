@@ -147,6 +147,9 @@ Ces scripts permettent d'exécuter différentes stratégies de trading.
 
 **Utilisation** :
 ```bash
+# Trading avec la stratégie LLM_V3
+python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --model-name claude-3-7-sonnet-20240620 --sentiment-weight 0.7 --min-confidence 0.65 --news-lookback 24 --position-size 0.03 --use-custom-symbols
+
 # Trading avec la stratégie de momentum
 python scripts/run_strategy_crypto_trader.py --strategy momentum --use-custom-symbols
 
