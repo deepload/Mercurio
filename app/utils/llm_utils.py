@@ -125,9 +125,17 @@ def _initialize_remote_client(model_name: str, api_key: Optional[str] = None) ->
                 if not claude_api_key:
                     logger.error("No Anthropic API key provided")
                     return None
+                
+                # Get base URL from environment if available
+                base_url = os.environ.get("ANTHROPIC_BASE_URL")
+                
+                if base_url:
+                    logger.info(f"Initialized Anthropic client for model {model_name} with base_url: {base_url}")
+                    client = anthropic.Anthropic(api_key=claude_api_key, base_url=base_url)
+                else:
+                    logger.info(f"Initialized Anthropic client for model {model_name} with default base_url")
+                    client = anthropic.Anthropic(api_key=claude_api_key)
                     
-                logger.info(f"Initialized Anthropic client for model {model_name}")
-                client = anthropic.Anthropic(api_key=claude_api_key)
                 client.model_name = model_name  # Store the model name for later use
                 return client
             except Exception as e:
@@ -226,11 +234,11 @@ def call_llm(model, prompt: str, temperature: float = 0.1,
         # Handle Anthropic API
         if ANTHROPIC_AVAILABLE:
             try:
-                logger.info(f"Calling Anthropic API with model: {model.model_name if hasattr(model, 'model_name') else 'claude-3-7-sonnet-20240620'}")
+                logger.info(f"Calling Anthropic API with model: {model.model_name if hasattr(model, 'model_name') else 'claude-3-5-sonnet-20240620'}")
                 logger.info(f"Anthropic API version: {anthropic.__version__ if hasattr(anthropic, '__version__') else 'unknown'}")
                 
                 # Déterminer le nom du modèle à utiliser
-                model_name = model.model_name if hasattr(model, "model_name") else "claude-3-7-sonnet-20240620"
+                model_name = model.model_name if hasattr(model, "model_name") else "claude-3-5-sonnet-20240620"
                 logger.info(f"Using model: {model_name}")
                 
                 # Vérifier la version de l'API Anthropic
