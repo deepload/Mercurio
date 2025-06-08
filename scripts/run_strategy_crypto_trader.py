@@ -793,11 +793,11 @@ def parse_arguments():
                       help="Période de recherche d'actualités (en heures)")
     
     # LLM_V3 (multi-agent)
-    parser.add_argument("--trader-model-name", type=str, default="claude-3-5-sonnet-20240620", 
+    parser.add_argument("--trader-model-name", type=str, default="claude-3-7-sonnet-20250219", 
                       help="Nom du modèle Claude pour l'agent Trader (LLM_V3)")
-    parser.add_argument("--analyst-model-name", type=str, default="claude-3-5-sonnet-20240620", 
+    parser.add_argument("--analyst-model-name", type=str, default="claude-3-7-sonnet-20250219", 
                       help="Nom du modèle Claude pour l'agent Analyste (LLM_V3)")
-    parser.add_argument("--coordinator-model-name", type=str, default="claude-3-5-sonnet-20240620", 
+    parser.add_argument("--coordinator-model-name", type=str, default="claude-3-7-sonnet-20250219", 
                       help="Nom du modèle Claude pour l'agent Coordinateur (LLM_V3)")
     
     # Options communes
