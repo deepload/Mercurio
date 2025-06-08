@@ -44,7 +44,7 @@ class NewsAPIAgent:
         
         logger.info(f"NewsAPI Agent initialized with lookback of {lookback_hours} hours")
         
-    async def get_news_for_symbol(self, symbol: str) -> List[Dict[str, Any]]:
+    def get_news_for_symbol(self, symbol: str) -> List[Dict[str, Any]]:
         """
         Get relevant news for a trading symbol
         

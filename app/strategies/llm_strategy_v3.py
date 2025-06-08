@@ -20,12 +20,32 @@ os.makedirs(log_dir, exist_ok=True)
 # Fonction d'écriture directe dans le fichier de log pour les prompts
 def log_prompt(message, symbol=""):
     """Fonction d'écriture directe dans le fichier de log pour les prompts"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_file = os.path.join(log_dir, 'claude_prompts.log')
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(f"[{timestamp}] - {symbol} - {message}\n")
-    # Également afficher dans la console
-    print(f"[{timestamp}] - {symbol} - {message}")
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_file = os.path.join(log_dir, 'claude_prompts.log')
+        
+        # S'assurer que le message est correctement formaté
+        if isinstance(message, str):
+            formatted_message = message.replace('\r\n', '\n')
+        else:
+            formatted_message = str(message)
+        
+        # Ajouter des séparateurs clairs pour faciliter la lecture
+        entry = f"[{timestamp}] - {symbol} - {formatted_message}\n"
+        entry += "-" * 80 + "\n"
+        
+        # Écrire dans le fichier avec un encodage explicite
+        with open(log_file, 'a', encoding='utf-8', errors='replace') as f:
+            f.write(entry)
+        
+        # Également afficher dans la console (version tronquée si trop long)
+        console_message = formatted_message
+        if len(console_message) > 500:
+            console_message = console_message[:250] + "..." + console_message[-250:]
+        print(f"[{timestamp}] - {symbol} - {console_message}")
+    except Exception as e:
+        print(f"ERREUR de logging: {str(e)}")
+        logger.error(f"Erreur lors de l'écriture dans le fichier de log: {str(e)}")
 
 # Test d'écriture dans le fichier de log
 log_prompt("===== INITIALISATION DU LOGGER CLAUDE PROMPTS =====\nLe logger est prêt à enregistrer les prompts et réponses Claude\n===========")
@@ -38,9 +58,9 @@ class LLMStrategyV3(BaseStrategy):
       - Claude Coordinateur : fusionne et arbitre les signaux pour agir avec un coup d'avance
     """
     def __init__(self,
-                 trader_model_name: str = "claude-3-7-sonnet-20240620",
-                 analyst_model_name: str = "claude-3-7-sonnet-20240620",
-                 coordinator_model_name: str = "claude-3-7-sonnet-20240620",
+                 trader_model_name: str = "claude-3-opus-20240229",
+                 analyst_model_name: str = "claude-3-opus-20240229",
+                 coordinator_model_name: str = "claude-3-opus-20240229",
                  api_key: Optional[str] = None,
                  news_lookback_hours: int = 2,
                  sentiment_weight: float = 0.6,
@@ -126,9 +146,15 @@ class LLMStrategyV3(BaseStrategy):
         )
         # Log du prompt de l'analyste pour débogage
         log_prompt(f"===== PROMPT ANALYSTE =====\n{analyst_prompt}\n===========", symbol)
-        analyst_response = call_llm(self.claude_analyst, analyst_prompt, temperature=0.2, max_tokens=512)
-        # Log de la réponse de l'analyste
-        log_prompt(f"===== RÉPONSE ANALYSTE =====\n{analyst_response}\n===========", symbol)
+        try:
+            analyst_response = call_llm(self.claude_analyst, analyst_prompt, temperature=0.2, max_tokens=512)
+            # Log de la réponse de l'analyste
+            log_prompt(f"===== RÉPONSE ANALYSTE =====\n{analyst_response}\n===========", symbol)
+        except Exception as e:
+            error_msg = f"ERREUR lors de l'appel à l'API Claude (Analyste): {str(e)}"
+            logger.error(error_msg)
+            log_prompt(f"===== ERREUR ANALYSTE =====\n{error_msg}\n===========", symbol)
+            analyst_response = "ERREUR: Impossible d'obtenir une analyse des news"
 
         # --- 2. Analyse technique par Claude Trader ---
         tech_prompt = (
@@ -145,9 +171,15 @@ class LLMStrategyV3(BaseStrategy):
         )
         # Log du prompt du trader pour débogage
         log_prompt(f"===== PROMPT TRADER =====\n{tech_prompt}\n===========", symbol)
-        trader_response = call_llm(self.claude_trader, tech_prompt, temperature=0.2, max_tokens=512)
-        # Log de la réponse du trader
-        log_prompt(f"===== RÉPONSE TRADER =====\n{trader_response}\n===========", symbol)
+        try:
+            trader_response = call_llm(self.claude_trader, tech_prompt, temperature=0.2, max_tokens=512)
+            # Log de la réponse du trader
+            log_prompt(f"===== RÉPONSE TRADER =====\n{trader_response}\n===========", symbol)
+        except Exception as e:
+            error_msg = f"ERREUR lors de l'appel à l'API Claude (Trader): {str(e)}"
+            logger.error(error_msg)
+            log_prompt(f"===== ERREUR TRADER =====\n{error_msg}\n===========", symbol)
+            trader_response = "ERREUR: Impossible d'obtenir une analyse technique"
 
         # --- 3. Coordination par Claude Coordinateur ---
         coordinator_prompt = (
@@ -179,9 +211,15 @@ class LLMStrategyV3(BaseStrategy):
         )
         # Log du prompt du coordinateur pour débogage
         log_prompt(f"===== PROMPT COORDINATEUR =====\n{coordinator_prompt}\n===========", symbol)
-        coordinator_response = call_llm(self.claude_coordinator, coordinator_prompt, temperature=0.3, max_tokens=1024)
-        # Log de la réponse du coordinateur
-        log_prompt(f"===== RÉPONSE COORDINATEUR =====\n{coordinator_response}\n===========", symbol)
+        try:
+            coordinator_response = call_llm(self.claude_coordinator, coordinator_prompt, temperature=0.3, max_tokens=1024)
+            # Log de la réponse du coordinateur
+            log_prompt(f"===== RÉPONSE COORDINATEUR =====\n{coordinator_response}\n===========", symbol)
+        except Exception as e:
+            error_msg = f"ERREUR lors de l'appel à l'API Claude (Coordinateur): {str(e)}"
+            logger.error(error_msg)
+            log_prompt(f"===== ERREUR COORDINATEUR =====\n{error_msg}\n===========", symbol)
+            coordinator_response = "ERREUR: Impossible d'obtenir une décision finale"
         
         # Extraction des décisions pour le résultat final
         result = {
@@ -304,7 +342,208 @@ class LLMStrategyV3(BaseStrategy):
                      f"Justification: {justification}\n===========", symbol)
         
         return trade_action
+    
+    async def load_data(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """
+        Charge les données historiques pour le symbole et la période spécifiés.
         
-    # Méthode pour le backtest (à implémenter si nécessaire)
-    # def backtest(self, historical_data: pd.DataFrame, **kwargs):
-    #     pass
+        Args:
+            symbol: Le symbole du marché (ex: 'BTC/USD')
+            start_date: Date de début pour le chargement des données
+            end_date: Date de fin pour le chargement des données
+            
+        Returns:
+            DataFrame contenant les données historiques
+        """
+        try:
+            # Utiliser le service de données de marché pour charger les données
+            data = self.market_data.get_historical_data(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                provider=self.data_provider
+            )
+            return data
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement des données pour {symbol}: {e}")
+            return pd.DataFrame()
+    
+    async def preprocess_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Prétraite les données pour l'analyse LLM.
+        
+        Args:
+            data: Données brutes du marché
+            
+        Returns:
+            Données prétraitées
+        """
+        # Pour LLM_V3, nous n'avons pas besoin de prétraitement complexe
+        # car les agents Claude travaillent avec des descriptions textuelles
+        if data.empty:
+            return data
+            
+        # Ajouter quelques indicateurs techniques de base qui pourraient être utiles
+        try:
+            # Calculer les moyennes mobiles
+            data['SMA_20'] = data['close'].rolling(window=20).mean()
+            data['SMA_50'] = data['close'].rolling(window=50).mean()
+            data['SMA_200'] = data['close'].rolling(window=200).mean()
+            
+            # Calculer RSI
+            delta = data['close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=14).mean()
+            avg_loss = loss.rolling(window=14).mean()
+            rs = avg_gain / avg_loss
+            data['RSI'] = 100 - (100 / (1 + rs))
+            
+            # Supprimer les lignes avec des NaN
+            data = data.dropna()
+            
+            return data
+        except Exception as e:
+            logger.error(f"Erreur lors du prétraitement des données: {e}")
+            return data
+    
+    async def predict(self, data: pd.DataFrame) -> Tuple[TradeAction, float]:
+        """
+        Génère un signal de trading basé sur les données d'entrée.
+        
+        Args:
+            data: Données de marché à analyser
+            
+        Returns:
+            Tuple de (TradeAction, confiance)
+        """
+        if data.empty:
+            return TradeAction.HOLD, 0.0
+            
+        # Utiliser la méthode analyze pour obtenir la prédiction
+        symbol = data.get('symbol', [None])[0] or "BTC/USD"
+        result = await self.analyze(data, symbol=symbol)
+        
+        # Convertir le signal en TradeAction
+        signal = result.get('signal', 'neutral').upper()
+        confidence = result.get('strength', 0.0)
+        
+        if signal == 'BUY':
+            return TradeAction.BUY, confidence
+        elif signal == 'SELL':
+            return TradeAction.SELL, confidence
+        else:
+            return TradeAction.HOLD, confidence
+    
+    async def train(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Entraîne le modèle de stratégie sur les données historiques.
+        Note: Pour LLM_V3, il n'y a pas d'entraînement traditionnel car nous utilisons
+        des modèles pré-entraînés avec des prompts spécifiques.
+        
+        Args:
+            data: Données de marché prétraitées
+            
+        Returns:
+            Dictionnaire contenant les métriques d'entraînement
+        """
+        # Pour LLM_V3, nous n'avons pas d'entraînement traditionnel
+        # mais nous pourrions implémenter ici l'optimisation des prompts
+        # basée sur les performances passées
+        
+        logger.info("La stratégie LLM_V3 n'a pas besoin d'entraînement traditionnel")
+        self.is_trained = True
+        
+        return {
+            "status": "success",
+            "message": "LLM_V3 utilise des modèles pré-entraînés, pas d'entraînement nécessaire"
+        }
+    
+    async def backtest(self, data: pd.DataFrame, initial_capital: float = 10000.0) -> Dict[str, Any]:
+        """
+        Effectue un backtest de la stratégie sur des données historiques.
+        
+        Args:
+            data: Données historiques de marché
+            initial_capital: Capital initial pour le backtest
+            
+        Returns:
+            Dictionnaire contenant les résultats du backtest
+        """
+        if data.empty:
+            return {"error": "Données insuffisantes pour le backtest"}
+            
+        try:
+            # Variables de suivi pour le backtest
+            capital = initial_capital
+            position = 0
+            trades = []
+            equity_curve = []
+            
+            # Parcourir les données jour par jour
+            for i in range(200, len(data)):
+                # Extraire les données jusqu'à ce jour
+                current_data = data.iloc[:i+1]
+                current_price = current_data.iloc[-1]['close']
+                current_date = current_data.iloc[-1].name
+                
+                # Obtenir le signal pour ce jour
+                symbol = data.get('symbol', [None])[0] or "BTC/USD"
+                result = await self.analyze(current_data.tail(200), symbol=symbol)
+                signal = result.get('signal', 'neutral').upper()
+                confidence = result.get('strength', 0.0)
+                reason = result.get('reason', '')
+                
+                # Exécuter le signal si la confiance est suffisante
+                if signal == 'BUY' and position == 0 and confidence >= self.min_confidence:
+                    # Calculer la taille de la position
+                    position_size = capital * self.position_size
+                    position = position_size / current_price
+                    capital -= position_size
+                    
+                    trades.append({
+                        "date": current_date,
+                        "type": "BUY",
+                        "price": current_price,
+                        "position": position,
+                        "capital": capital,
+                        "reason": reason
+                    })
+                    
+                elif signal == 'SELL' and position > 0 and confidence >= self.min_confidence:
+                    # Vendre la position
+                    capital += position * current_price
+                    position = 0
+                    
+                    trades.append({
+                        "date": current_date,
+                        "type": "SELL",
+                        "price": current_price,
+                        "position": position,
+                        "capital": capital,
+                        "reason": reason
+                    })
+                
+                # Calculer la valeur totale du portefeuille
+                portfolio_value = capital + (position * current_price)
+                equity_curve.append({
+                    "date": current_date,
+                    "value": portfolio_value
+                })
+            
+            # Calculer les métriques de performance
+            final_value = capital + (position * data.iloc[-1]['close'])
+            total_return = (final_value - initial_capital) / initial_capital * 100
+            
+            return {
+                "initial_capital": initial_capital,
+                "final_value": final_value,
+                "total_return": total_return,
+                "total_trades": len(trades),
+                "trades": trades,
+                "equity_curve": equity_curve
+            }
+            
+        except Exception as e:
+            logger.error(f"Erreur lors du backtest: {e}")
+            return {"error": str(e)}
