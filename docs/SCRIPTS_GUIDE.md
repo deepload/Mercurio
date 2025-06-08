@@ -147,6 +147,9 @@ Ces scripts permettent d'exécuter différentes stratégies de trading.
 
 **Utilisation** :
 ```bash
+# Trading avec la stratégie LLM_V3
+python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --model-name claude-3-7-sonnet-20240620 --sentiment-weight 0.7 --min-confidence 0.65 --news-lookback 24 --position-size 0.03 --use-custom-symbols
+
 # Trading avec la stratégie de momentum
 python scripts/run_strategy_crypto_trader.py --strategy momentum --use-custom-symbols
 
@@ -185,6 +188,9 @@ python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --model-name clau
 
 #Trading en short avec LLMStrategyV2 et Binance pour les données de marché sur une session de 48 heures
 python scripts/run_strategy_crypto_trader.py --strategy llm_v2 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 48h --position-size 0.05 --stop-loss 0.02 --take-profit 0.05 --short
+
+#Trading avec LLMStrategyV3 et Binance pour les données de marché 
+python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --news-lookback 25 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance  --position-size 0.01 --stop-loss 0.02 --take-profit 0.05 
 
 # Trading avec LLMStrategyV3 et Binance pour les données de marché sur une session de 1 heure
 python scripts/run_strategy_crypto_trader.py --strategy llm_v3 --news-lookback 2 --sentiment-weight 0.6 --use-custom-symbols --data-provider binance --duration 1h --position-size 0.01 --stop-loss 0.02 --take-profit 0.05

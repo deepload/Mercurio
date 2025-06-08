@@ -606,33 +606,12 @@ class AlpacaCryptoTrader:
                     equity = float(account_info.equity)
                     
                     logger.info("\n===== INFORMATION DU COMPTE ALPACA =====")
-                    logger.info(f"Solde disponible: ${buying_power:.2f}")
+                    logger.info(f"Pouvoir d'achat: ${buying_power:.2f}")
                     logger.info(f"Liquidités: ${cash:.2f}")
                     logger.info(f"Valeur totale: ${equity:.2f}")
-                    
-                    # Afficher les positions ouvertes
-                    try:
-                        positions = self.api.list_positions()
-                        if positions:
-                            logger.info("\n----- POSITIONS OUVERTES -----")
-                            for position in positions:
-                                symbol = position.symbol
-                                qty = float(position.qty)
-                                current_price = float(position.current_price)
-                                market_value = float(position.market_value)
-                                entry_price = float(position.avg_entry_price)
-                                profit_loss = float(position.unrealized_pl)
-                                profit_loss_pct = float(position.unrealized_plpc) * 100
-                                logger.info(f"{symbol}: {qty} @ ${entry_price:.2f} | Prix actuel: ${current_price:.2f} | Valeur: ${market_value:.2f} | P/L: ${profit_loss:.2f} ({profit_loss_pct:.2f}%)")
-                            logger.info("--------------------------")
-                        else:
-                            logger.info("Pas de positions ouvertes")
-                    except Exception as e:
-                        logger.error(f"Erreur lors de la récupération des positions: {e}")
-                    
-                    logger.info("=======================================\n")
+                    logger.info("======================================\n")
                 except Exception as e:
-                    logger.error(f"Erreur lors de la récupération du solde Alpaca: {e}")
+                    logger.error(f"Erreur lors de la récupération des informations du compte: {e}")
                 
                 # Traiter chaque symbole
                 for symbol in trading_symbols:
@@ -748,7 +727,7 @@ class AlpacaCryptoTrader:
                             if isinstance(close_price, pd.Series):
                                 close_price = close_price.iloc[0]
                             current_price = float(close_price)
-                            logger.info(f"{symbol} prix actuel (fallback dernière barre): ${current_price:.4f}")
+                            logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
                         else:
                             logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
                             return
@@ -760,7 +739,7 @@ class AlpacaCryptoTrader:
                         if isinstance(close_price, pd.Series):
                             close_price = close_price.iloc[0]
                         current_price = float(close_price)
-                        logger.info(f"{symbol} prix actuel (fallback dernière barre): ${current_price:.4f}")
+                        logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
                     else:
                         logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
                         return
@@ -773,7 +752,7 @@ class AlpacaCryptoTrader:
                     if isinstance(close_price, pd.Series):
                         close_price = close_price.iloc[0]
                     current_price = float(close_price)
-                    logger.info(f"{symbol} prix actuel (fallback dernière barre): ${current_price:.4f}")
+                    logger.info(f"{symbol} prix actuel (Alpaca dernière barre): ${current_price:.4f}")
                 else:
                     logger.error(f"Pas de données disponibles pour obtenir le prix actuel de {symbol}")
                     return
@@ -833,13 +812,38 @@ class AlpacaCryptoTrader:
                     
                     # Exécuter les signaux avec un seuil de confiance minimum
                     min_confidence = self.strategy_params.get('min_confidence', 0.5)
+                    logger.info(f"DEBUG SELL: Signal={signal}, Position={position is not None}, Strength={strength}, MinConf={min_confidence}")
+                    
                     if signal.lower() == 'buy' and not position and strength >= min_confidence:
                         logger.info(f"Signal d'achat LLM_V3 fort ({strength:.2f}) pour {symbol}")
                         self.execute_buy(symbol, current_price)
-                    elif signal.lower() == 'sell' and position and strength >= min_confidence:
+                    elif signal.lower() == 'sell' and strength >= min_confidence:
                         logger.info(f"Signal de vente LLM_V3 fort ({strength:.2f}) pour {symbol}")
-                        self.execute_sell(symbol, current_price, position)
+                        
+                        # Vérifier si nous avons une position à vendre
+                        if position:
+                            logger.info(f"Exécution de vente pour position existante: {symbol}, qty={position.qty}")
+                            self.execute_sell(symbol, current_price, position)
+                        else:
+                            # Tenter de récupérer la position avec une approche plus robuste
+                            try:
+                                # Récupérer toutes les positions et chercher le symbole
+                                all_positions = self.api.list_positions()
+                                matching_positions = [p for p in all_positions if p.symbol == symbol]
+                                
+                                if matching_positions:
+                                    position = matching_positions[0]
+                                    logger.info(f"Position trouvée via list_positions: {symbol}, qty={position.qty}")
+                                    self.execute_sell(symbol, current_price, position)
+                                else:
+                                    # Exécuter une vente à découvert
+                                    logger.info(f"Pas de position trouvée pour {symbol}, exécution d'une vente à découvert")
+                                    self.execute_short_sell(symbol, current_price)
+                            except Exception as e:
+                                logger.error(f"Erreur lors de la récupération des positions pour {symbol}: {e}")
                     else:
+                        if signal.lower() == 'sell':
+                            logger.warning(f"Signal SELL non exécuté: Position={position is not None}, Strength={strength}, MinConf={min_confidence}")
                         logger.info(f"Pas d'action LLM_V3 pour {symbol}: signal {signal} avec force {strength:.2f} (seuil: {min_confidence})")
                 else:
                     logger.warning(f"Résultat LLM_V3 invalide pour {symbol}: {result}")
@@ -1012,7 +1016,7 @@ class AlpacaCryptoTrader:
             logger.error(f"Erreur lors de l'achat de {symbol}: {e}")
     
     def execute_sell(self, symbol: str, price: float, position):
-        """Exécuter un ordre de vente"""
+        """Exécuter un ordre de vente pour une position existante"""
         try:
             qty = float(position.qty)
             
@@ -1045,6 +1049,48 @@ class AlpacaCryptoTrader:
                 
         except Exception as e:
             logger.error(f"Erreur d'exécution de vente pour {symbol}: {e}")
+            
+    def execute_short_sell(self, symbol: str, price: float):
+        """Exécuter un ordre de vente à découvert"""
+        try:
+            # Déterminer la quantité à vendre à découvert en fonction de la taille de position
+            position_size = self.strategy_params.get('position_size', 0.03)
+            account = self.api.get_account()
+            account_value = float(account.equity)
+            
+            # Calculer la quantité en fonction de la taille de position et du prix actuel
+            qty = (account_value * position_size) / price
+            qty = round(qty, 6)  # Arrondir à 6 décimales pour les cryptos
+            
+            if qty <= 0:
+                logger.warning(f"Quantité calculée invalide pour vente à découvert de {symbol}: {qty}")
+                return
+                
+            logger.info(f"SIGNAL DE VENTE À DÉCOUVERT: {symbol} à ${price:.4f}, qté: {qty:.6f}")
+            
+            # Placer un ordre au marché avec side='sell' pour une vente à découvert
+            order = self.api.submit_order(
+                symbol=symbol,
+                qty=qty,
+                side='sell',
+                type='market',
+                time_in_force='gtc'
+            )
+            
+            if order:
+                logger.info(f"Ordre de vente à découvert placé pour {symbol}: {order.id}")
+                self.trade_history.append({
+                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'symbol': symbol,
+                    'action': 'vente_découvert',
+                    'quantity': qty,
+                    'price': price
+                })
+            else:
+                logger.error(f"Échec du placement de l'ordre de vente à découvert pour {symbol}")
+                
+        except Exception as e:
+            logger.error(f"Erreur d'exécution de vente à découvert pour {symbol}: {e}")
     
     def update_portfolio_state(self):
         """Mettre à jour la valeur du portefeuille et les positions"""
