@@ -432,6 +432,11 @@ class AlpacaCryptoTrader:
 
         logger.info(f"AlpacaCryptoTrader initialisé avec fournisseur de données {data_provider}")
 
+    def set_strategy(self, strategy):
+        """Définir la stratégie de trading"""
+        self.strategy = strategy
+        logger.info(f"Stratégie de trading définie: {strategy.__class__.__name__}")
+
     def initialize(self):
         """Initialiser les services et charger la configuration"""
         try:
@@ -761,28 +766,50 @@ class AlpacaCryptoTrader:
                 logger.error(f"Impossible d'obtenir le prix actuel pour {symbol}: {e}")
                 return
             
-            # Logique de trading - Croisement de moyennes mobiles
-            if len(bars) >= self.slow_ma_period:
-                last_row = bars.iloc[-1]
-                prev_row = bars.iloc[-2]
-                
-                # Vérifier le signal d'achat: MA rapide croise au-dessus de la MA lente
-                buy_signal = (
-                    prev_row['fast_ma'] <= prev_row['slow_ma'] and 
-                    last_row['fast_ma'] > last_row['slow_ma']
-                )
-                
-                # Vérifier le signal de vente: MA rapide croise en dessous de la MA lente
-                sell_signal = (
-                    prev_row['fast_ma'] >= prev_row['slow_ma'] and 
-                    last_row['fast_ma'] < last_row['slow_ma']
-                )
-                
-                # Exécuter les signaux
-                if buy_signal and not position:
-                    self.execute_buy(symbol, current_price)
-                elif sell_signal and position:
-                    self.execute_sell(symbol, current_price, position)
+            # Utiliser la stratégie configurée si elle existe, sinon utiliser la stratégie par défaut
+            if hasattr(self, 'strategy') and self.strategy is not None:
+                logger.info(f"Utilisation de la stratégie {self.strategy.__class__.__name__} pour {symbol}")
+                try:
+                    # Appeler la méthode analyze de la stratégie avec les données historiques
+                    result = self.strategy.analyze(bars, symbol=symbol)
+                    logger.info(f"Résultat de l'analyse pour {symbol}: {result}")
+                    
+                    # Vérifier le signal de la stratégie
+                    signal = result.get('signal', 'neutral')
+                    strength = result.get('strength', 0.0)
+                    reason = result.get('reason', 'Aucune raison fournie')
+                    
+                    # Pour les stratégies LLM, vérifier aussi final_decision
+                    if 'final_decision' in result:
+                        if result['final_decision'] == 'BUY':
+                            signal = 'buy'
+                        elif result['final_decision'] == 'SELL':
+                            signal = 'sell'
+                        elif result['final_decision'] == 'HOLD':
+                            signal = 'neutral'
+                        strength = result.get('confidence', 0.0)
+                    
+                    logger.info(f"Signal pour {symbol}: {signal.upper()} avec force {strength:.2f} - Raison: {reason}")
+                    
+                    # Exécuter les signaux
+                    if signal.lower() == 'buy' and not position and strength >= 0.5:
+                        logger.info(f"Signal d'achat fort ({strength:.2f}) pour {symbol}")
+                        self.execute_buy(symbol, current_price)
+                    elif signal.lower() == 'sell' and position and strength >= 0.5:
+                        logger.info(f"Signal de vente fort ({strength:.2f}) pour {symbol}")
+                        self.execute_sell(symbol, current_price, position)
+                    else:
+                        logger.info(f"Pas d'action pour {symbol}: signal {signal} avec force {strength:.2f}")
+                        
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'appel de la stratégie pour {symbol}: {e}")
+                    # Fallback à la stratégie par défaut
+                    logger.info(f"Utilisation de la stratégie par défaut pour {symbol} suite à l'erreur")
+                    self._use_default_strategy(symbol, bars, position, current_price)
+            else:
+                # Utiliser la stratégie par défaut de moyennes mobiles
+                logger.info(f"Utilisation de la stratégie par défaut pour {symbol}")
+                self._use_default_strategy(symbol, bars, position, current_price)
                 
                 # Vérifier le stop loss, take profit et trailing stop
                 if position:
@@ -942,6 +969,30 @@ class AlpacaCryptoTrader:
                 
         except Exception as e:
             logger.error(f"Erreur de mise à jour de l'état du portefeuille: {e}")
+    
+    def _use_default_strategy(self, symbol, bars, position, current_price):
+        """Utilise la stratégie par défaut de moyennes mobiles"""
+        if len(bars) >= self.slow_ma_period:
+            last_row = bars.iloc[-1]
+            prev_row = bars.iloc[-2]
+            
+            # Vérifier le signal d'achat: MA rapide croise au-dessus de la MA lente
+            buy_signal = (
+                prev_row['fast_ma'] <= prev_row['slow_ma'] and 
+                last_row['fast_ma'] > last_row['slow_ma']
+            )
+            
+            # Vérifier le signal de vente: MA rapide croise en dessous de la MA lente
+            sell_signal = (
+                prev_row['fast_ma'] >= prev_row['slow_ma'] and 
+                last_row['fast_ma'] < last_row['slow_ma']
+            )
+            
+            # Exécuter les signaux
+            if buy_signal and not position:
+                self.execute_buy(symbol, current_price)
+            elif sell_signal and position:
+                self.execute_sell(symbol, current_price, position)
     
     def generate_performance_report(self):
         """Générer un rapport de performance à la fin de la session de trading"""

@@ -1,8 +1,10 @@
 import os
 import logging
+import sys
 from datetime import datetime, timedelta
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Optional, Dict, Tuple
 import pandas as pd
+from abc import ABC, abstractmethod
 from app.strategies.base import BaseStrategy
 from app.db.models import TradeAction
 from app.utils.llm_utils import load_llm_model, call_llm
@@ -10,6 +12,23 @@ from app.strategies.sentiment.news_api_agent import NewsAPIAgent
 from app.services.market_data import MarketDataService
 
 logger = logging.getLogger(__name__)
+
+# Créer le dossier logs s'il n'existe pas
+log_dir = os.path.join(os.getcwd(), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+
+# Fonction d'écriture directe dans le fichier de log pour les prompts
+def log_prompt(message, symbol=""):
+    """Fonction d'écriture directe dans le fichier de log pour les prompts"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_file = os.path.join(log_dir, 'claude_prompts.log')
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(f"[{timestamp}] - {symbol} - {message}\n")
+    # Également afficher dans la console
+    print(f"[{timestamp}] - {symbol} - {message}")
+
+# Test d'écriture dans le fichier de log
+log_prompt("===== INITIALISATION DU LOGGER CLAUDE PROMPTS =====\nLe logger est prêt à enregistrer les prompts et réponses Claude\n===========")
 
 class LLMStrategyV3(BaseStrategy):
     """
@@ -32,6 +51,7 @@ class LLMStrategyV3(BaseStrategy):
                  data_provider: str = "binance",
                  use_local_model: bool = False,
                  local_model_path: Optional[str] = None,
+                 newsapi_key: Optional[str] = None,
                  **kwargs):
         super().__init__(**kwargs)
         self.name = "LLMStrategyV3"
@@ -50,10 +70,11 @@ class LLMStrategyV3(BaseStrategy):
         self.data_provider = data_provider
         self.use_local_model = use_local_model
         self.local_model_path = local_model_path
+        self.newsapi_key = newsapi_key or os.environ.get("NEWSAPI_KEY")
 
         # Services
         self.market_data = MarketDataService()
-        self.news_agent = NewsAPIAgent(lookback_hours=self.news_lookback_hours)
+        self.news_agent = NewsAPIAgent(api_key=self.newsapi_key, lookback_hours=self.news_lookback_hours)
 
         # LLM Agents
         self.claude_trader = load_llm_model(
@@ -78,12 +99,16 @@ class LLMStrategyV3(BaseStrategy):
         logger.info(f"Initialized LLMStrategyV3 with trader model: {self.trader_model_name}, analyst model: {self.analyst_model_name}, coordinator model: {self.coordinator_model_name}")
 
     def analyze(self, data: pd.DataFrame, symbol: str = None, **kwargs) -> Dict[str, Any]:
-        """
-        Analyse complète avec architecture multi-agent Claude :
-        1. Claude Analyste collecte et résume les news/événements récents
-        2. Claude Trader analyse le marché et propose des actions
-        3. Claude Coordinateur fusionne les analyses et prend la décision finale
-        """
+        """Analyse multi-agent: Analyste (news) + Trader (technique) + Coordinateur (décision finale)"""
+        # Log pour vérifier si la méthode est appelée
+        log_prompt(f"===== MÉTHODE ANALYZE APPELÉE POUR {symbol} =====\nDonnées: {len(data)} lignes", symbol)
+        logger.info(f"LLMStrategyV3.analyze appelée pour {symbol} avec {len(data)} lignes de données")
+        
+        # Vérifier si les données sont suffisantes
+        if data is None or len(data) < 10:
+            logger.warning(f"Données insuffisantes pour l'analyse LLM_V3 de {symbol}")
+            return {"final_decision": "HOLD", "confidence": 0.0, "reason": "Données insuffisantes"}
+        
         symbol = symbol or kwargs.get("symbol", "BTC/USD")
         now = datetime.utcnow()
 
@@ -99,7 +124,11 @@ class LLMStrategyV3(BaseStrategy):
             f"RÉSUMÉ: [ton analyse concise]\n\n"
             f"Actualités des dernières {self.news_lookback_hours} heures:\n{news_context}"
         )
+        # Log du prompt de l'analyste pour débogage
+        log_prompt(f"===== PROMPT ANALYSTE =====\n{analyst_prompt}\n===========", symbol)
         analyst_response = call_llm(self.claude_analyst, analyst_prompt, temperature=0.2, max_tokens=512)
+        # Log de la réponse de l'analyste
+        log_prompt(f"===== RÉPONSE ANALYSTE =====\n{analyst_response}\n===========", symbol)
 
         # --- 2. Analyse technique par Claude Trader ---
         tech_prompt = (
@@ -114,7 +143,11 @@ class LLMStrategyV3(BaseStrategy):
             f"TAKE PROFIT: [pourcentage recommandé, entre 0.01 et {self.take_profit*2}]\n"
             f"ANALYSE: [justification brève de ta décision]\n"
         )
+        # Log du prompt du trader pour débogage
+        log_prompt(f"===== PROMPT TRADER =====\n{tech_prompt}\n===========", symbol)
         trader_response = call_llm(self.claude_trader, tech_prompt, temperature=0.2, max_tokens=512)
+        # Log de la réponse du trader
+        log_prompt(f"===== RÉPONSE TRADER =====\n{trader_response}\n===========", symbol)
 
         # --- 3. Coordination par Claude Coordinateur ---
         coordinator_prompt = (
@@ -133,6 +166,9 @@ class LLMStrategyV3(BaseStrategy):
             f"CONTEXTE IMPORTANT:\n"
             f"- Il existe une latence entre les données Binance et l'exécution Alpaca\n"
             f"- Tu dois anticiper cette latence dans ta décision finale\n\n"
+            f"N'hésite pas à recommander SELL si les conditions sont réunies (tendance baissière, mauvaises nouvelles, etc.)\n"
+            f"Équilibre tes décisions entre BUY, SELL et HOLD selon les conditions réelles du marché\n"
+            f"Pour les cryptos en baisse, n'hésite pas à vendre pour limiter les pertes\n\n"
             f"Format attendu pour ta réponse finale:\n"
             f"ACTION: [BUY, SELL ou HOLD]\n"
             f"CONFIANCE: [valeur entre 0.0 et 1.0]\n"
@@ -141,7 +177,11 @@ class LLMStrategyV3(BaseStrategy):
             f"TAKE PROFIT: [pourcentage]\n"
             f"JUSTIFICATION: [explication concise de ta décision finale]\n"
         )
+        # Log du prompt du coordinateur pour débogage
+        log_prompt(f"===== PROMPT COORDINATEUR =====\n{coordinator_prompt}\n===========", symbol)
         coordinator_response = call_llm(self.claude_coordinator, coordinator_prompt, temperature=0.3, max_tokens=1024)
+        # Log de la réponse du coordinateur
+        log_prompt(f"===== RÉPONSE COORDINATEUR =====\n{coordinator_response}\n===========", symbol)
         
         # Extraction des décisions pour le résultat final
         result = {
@@ -165,47 +205,78 @@ class LLMStrategyV3(BaseStrategy):
         symbol = symbol or analysis_result.get("symbol", "BTC/USD")
         final_decision = analysis_result.get("final_decision", "")
         
+        # Log de la décision complète pour débogage
+        logger.info(f"===== DÉCISION COMPLÈTE POUR {symbol} =====\n{final_decision}\n===================================")
+        log_prompt(f"===== DÉCISION FINALE À EXÉCUTER =====\n{final_decision}\n===========", symbol)
+        
         # Extraction des paramètres de trading depuis la réponse du coordinateur
         action = "HOLD"  # Valeur par défaut
         confidence = 0.0
         position_size = self.position_size
         stop_loss = self.stop_loss
         take_profit = self.take_profit
+        justification = ""
         
-        # Parsing de la réponse du coordinateur
+        # Parsing de la réponse du coordinateur avec logs détaillés
         for line in final_decision.split("\n"):
             if line.startswith("ACTION:"):
                 action_str = line.replace("ACTION:", "").strip()
-                if action_str in ["BUY", "SELL", "HOLD"]:
-                    action = action_str
-            elif line.startswith("CONFIANCE:"):
+                logger.info(f"Action détectée dans la réponse: '{action_str}'")
+                if action_str.upper() in ["BUY", "SELL", "HOLD"]:
+                    action = action_str.upper()
+                    logger.info(f"Action validée: {action}")
+                    if action == "SELL":
+                        log_prompt(f"===== ACTION SELL DÉTECTÉE =====\n"
+                                 f"Ligne complète: {line}\n===========", symbol)
+                else:
+                    logger.warning(f"Action non reconnue: '{action_str}', utilisation de HOLD par défaut")
+            elif line.startswith("CONFIANCE:") or line.startswith("CONFIDENCE:"):
                 try:
-                    confidence = float(line.replace("CONFIANCE:", "").strip())
-                except ValueError:
-                    pass
-            elif line.startswith("TAILLE POSITION:"):
+                    conf_line = line.replace("CONFIANCE:", "").replace("CONFIDENCE:", "").strip()
+                    confidence = float(conf_line)
+                    logger.info(f"Confiance détectée: {confidence}")
+                except ValueError as e:
+                    logger.error(f"Erreur de conversion de la confiance: {e}, valeur: '{line}'")
+            elif line.startswith("TAILLE POSITION:") or line.startswith("POSITION SIZE:"):
                 try:
-                    size_str = line.replace("TAILLE POSITION:", "").strip().replace("%", "")
+                    size_str = line.replace("TAILLE POSITION:", "").replace("POSITION SIZE:", "").strip().replace("%", "")
                     position_size = float(size_str) / 100  # Conversion en décimal
-                except ValueError:
-                    pass
+                    logger.info(f"Taille de position détectée: {position_size}")
+                except ValueError as e:
+                    logger.error(f"Erreur de conversion de la taille de position: {e}, valeur: '{line}'")
             elif line.startswith("STOP LOSS:"):
                 try:
                     sl_str = line.replace("STOP LOSS:", "").strip().replace("%", "")
                     stop_loss = float(sl_str) / 100  # Conversion en décimal
-                except ValueError:
-                    pass
+                    logger.info(f"Stop loss détecté: {stop_loss}")
+                except ValueError as e:
+                    logger.error(f"Erreur de conversion du stop loss: {e}, valeur: '{line}'")
             elif line.startswith("TAKE PROFIT:"):
                 try:
                     tp_str = line.replace("TAKE PROFIT:", "").strip().replace("%", "")
                     take_profit = float(tp_str) / 100  # Conversion en décimal
-                except ValueError:
-                    pass
+                    logger.info(f"Take profit détecté: {take_profit}")
+                except ValueError as e:
+                    logger.error(f"Erreur de conversion du take profit: {e}, valeur: '{line}'")
+            elif line.startswith("JUSTIFICATION:"):
+                justification = line.replace("JUSTIFICATION:", "").strip()
+                logger.info(f"Justification: {justification}")
         
-        # Vérification de la confiance minimale
+        # Vérification de la confiance minimale avec logs détaillés
+        original_action = action
         if confidence < self.min_confidence:
-            logger.info(f"Confiance insuffisante ({confidence:.2f} < {self.min_confidence}), pas d'action")
+            if action == "SELL":
+                logger.warning(f"Action SELL convertie en HOLD car confiance ({confidence}) < seuil minimal ({self.min_confidence})")
+                log_prompt(f"===== SELL CONVERTI EN HOLD =====\n"
+                         f"Confiance: {confidence}, Seuil minimal: {self.min_confidence}\n"
+                         f"Justification: {justification}\n===========", symbol)
+            elif action == "BUY":
+                logger.warning(f"Action BUY convertie en HOLD car confiance ({confidence}) < seuil minimal ({self.min_confidence})")
+            else:
+                logger.info(f"Action HOLD maintenue, confiance ({confidence}) < seuil minimal ({self.min_confidence})")
             action = "HOLD"
+        else:
+            logger.info(f"Action {action} validée avec confiance {confidence} >= seuil minimal {self.min_confidence}")
         
         # Création de l'action de trading
         trade_action = TradeAction(
@@ -219,7 +290,19 @@ class LLMStrategyV3(BaseStrategy):
             strategy_name=self.name
         )
         
-        logger.info(f"LLM_V3 Trade Action: {symbol} {action} (conf: {confidence:.2f}, size: {position_size:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f})")
+        # Log final de l'action de trading
+        logger.info(f"Action finale pour {symbol}: {action} (action originale: {original_action})")
+        if action == "SELL":
+            logger.info(f"===== ORDRE SELL VALIDÉ POUR {symbol} =====\n"
+                       f"Confiance: {confidence}\n"
+                       f"Taille: {position_size}\n"
+                       f"Stop Loss: {stop_loss}\n"
+                       f"Take Profit: {take_profit}\n"
+                       f"Justification: {justification}\n===================================")
+            log_prompt(f"===== ORDRE SELL VALIDÉ =====\n"
+                     f"Confiance: {confidence}, Taille: {position_size}\n"
+                     f"Justification: {justification}\n===========", symbol)
+        
         return trade_action
         
     # Méthode pour le backtest (à implémenter si nécessaire)

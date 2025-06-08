@@ -224,22 +224,84 @@ def call_llm(model, prompt: str, temperature: float = 0.1,
     
     try:
         # Handle Anthropic API
-        if hasattr(model, "messages") and ANTHROPIC_AVAILABLE:
+        if ANTHROPIC_AVAILABLE:
             try:
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
+                logger.info(f"Calling Anthropic API with model: {model.model_name if hasattr(model, 'model_name') else 'claude-3-7-sonnet-20240620'}")
+                logger.info(f"Anthropic API version: {anthropic.__version__ if hasattr(anthropic, '__version__') else 'unknown'}")
                 
-                response = model.messages.create(
-                    model=model.model_name if hasattr(model, "model_name") else "claude-3-5-sonnet-20241022",
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stop_sequences=stop_sequences
-                )
+                # Déterminer le nom du modèle à utiliser
+                model_name = model.model_name if hasattr(model, "model_name") else "claude-3-7-sonnet-20240620"
+                logger.info(f"Using model: {model_name}")
                 
-                return response.content[0].text
+                # Vérifier la version de l'API Anthropic
+                anthropic_version = getattr(anthropic, "__version__", "0.0.0")
+                logger.info(f"Detected Anthropic version: {anthropic_version}")
+                
+                # Compatibilité avec différentes versions de l'API Anthropic
+                if hasattr(model, "messages"):
+                    # Format pour API v0.4.0+
+                    logger.info("Using Anthropic API v0.4.0+ format with messages.create()")
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.append({"role": "user", "content": prompt})
+                    
+                    logger.info(f"Messages structure: {messages}")
+                    
+                    response = model.messages.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stop_sequences=stop_sequences
+                    )
+                    logger.info("Anthropic API call successful using messages.create()")
+                    return response.content[0].text
+                elif hasattr(model, "completions"):
+                    # Format pour API v0.3.x
+                    logger.info("Using Anthropic API v0.3.x format with completions.create()")
+                    response = model.completions.create(
+                        model=model_name,
+                        prompt=f"\n\nHuman: {prompt}\n\nAssistant:",
+                        temperature=temperature,
+                        max_tokens_to_sample=max_tokens,
+                        stop_sequences=stop_sequences or ["\n\nHuman:"]
+                    )
+                    logger.info("Anthropic API call successful using completions.create()")
+                    return response.completion
+                else:
+                    # Format pour API v0.5.x+
+                    logger.info("Using Anthropic API v0.5.x+ format with direct client.messages()")
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.append({"role": "user", "content": prompt})
+                    
+                    # Pour Anthropic v0.52.2
+                    try:
+                        response = model.messages.create(
+                            model=model_name,
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens
+                        )
+                        logger.info("Anthropic API v0.52.2 call successful")
+                        if hasattr(response, 'content') and len(response.content) > 0:
+                            if hasattr(response.content[0], 'text'):
+                                return response.content[0].text
+                            elif hasattr(response.content[0], 'value'):
+                                return response.content[0].value
+                        return str(response)
+                    except Exception as e:
+                        logger.warning(f"Error with Anthropic API v0.52.2 format: {e}, trying direct call")
+                        # Dernier recours - appel direct
+                        response = model(
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens
+                        )
+                        logger.info("Anthropic API call successful using direct call")
+                        return str(response)
             except Exception as e:
                 logger.error(f"Error with Anthropic API: {str(e)}")
                 return f"Error with Anthropic API: {str(e)}"

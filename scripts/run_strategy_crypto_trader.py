@@ -1066,6 +1066,10 @@ def main():
         print(f"Stratégie {strategy_instance.name} initialisée avec succès")
         print("Utilisation du trader Alpaca de base avec adaptation des signaux")
         
+        # Enregistrer la stratégie pour utilisation future
+        global STRATEGY_INSTANCE
+        STRATEGY_INSTANCE = strategy_instance
+        
         # Créer le trader avec la durée de session spécifiée
         trader = AlpacaCryptoTrader(session_duration=session_duration, data_provider=args.data_provider)
         
